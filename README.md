@@ -1,11 +1,43 @@
-# hcp-dp
+# Height-Compressed Dynamic Programming (HCP-DP)
 
-Height-Compressed Dynamic Programming (HCP-DP) in Rust.
-A generic engine + reference implementations for running massive dynamic programs in dramatically less memory—without sacrificing exactness.
+[![CI](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml/badge.svg)](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml)
+[![Nightly Benchmarks](https://github.com/logannye/hcp-dp/actions/workflows/nightly-perf.yml/badge.svg)](https://github.com/logannye/hcp-dp/actions/workflows/nightly-perf.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
-This repo packages height-compression algorithmic optimizations into a practical, well-structured Rust library you can drop into real systems.
+> Height-Compressed Dynamic Programming (HCP-DP) in Rust — run massive dynamic programs with exact answers and dramatically reduced memory.
+
+This repository packages height-compression algorithmic optimizations into a production-quality Rust crate, complete with reference problems, property tests, and performance baselines.
 
 ---
+
+## Table of Contents
+
+- [At a Glance](#at-a-glance)
+- [What is this?](#what-is-this)
+- [Why is this significant?](#why-is-this-significant)
+- [High-level idea](#high-level-idea)
+- [Repository layout](#repository-layout)
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [Testing & QA](#testing--qa)
+- [Optional features](#optional-features)
+- [Core API: how it works](#core-api-how-it-works)
+- [Using the built-in problems](#using-the-built-in-problems)
+- [How to adapt this to your own DP](#how-to-adapt-this-to-your-own-dp)
+- [Design notes & limitations](#design-notes--limitations)
+- [Roadmap (ideas)](#roadmap-ideas)
+- [Documentation & Support](#documentation--support)
+- [License](#license)
+
+---
+
+## At a Glance
+
+- **Generic engine**: drop-in `HcpEngine` orchestrates height-compressed DP for any problem that implements the `HcpProblem` trait.
+- **Reference implementations**: LCS (full and banded), Needleman–Wunsch (linear and affine gaps), Viterbi decoding, layered DAG shortest paths, matrix-chain multiplication.
+- **Safety and correctness**: rich unit, integration, and property tests; optional heavy stress and deterministic parallel equivalence suites.
+- **Performance tooling**: Criterion benchmarks with RSS tracking, perf baseline enforcement, and scheduled GitHub Actions runs.
+- **Developer ergonomics**: builder API, feature flags (`parallel`, `tracing`, `heavy`), comprehensive CI, and contributor guide.
 
 ## What is this?
 
@@ -122,7 +154,7 @@ hcp-dp/
 │   ├─ traits.rs              # HcpProblem trait and core interface
 │   ├─ engine.rs              # generic height-compressed DP engine
 │   ├─ blocks.rs              # block summary struct
-│   ├─ util.rs                # helpers (default block size, etc.)
+│   ├─ utils.rs               # helpers (default block size, etc.)
 │   └─ problems/
 │       ├─ mod.rs
 │       ├─ lcs.rs             # Full LCS via Hirschberg-style compression
@@ -152,28 +184,19 @@ hcp-dp/
 
 ## Installation
 
-In your own Rust project:
+### Use as a dependency
 
 ```toml
 [dependencies]
-hcp-dp = { git = "https://github.com/your-org/hcp-dp", package = "hcp-dp" }
+hcp-dp = { git = "https://github.com/logannye/hcp-dp", package = "hcp-dp" }
 ```
 
-Or clone this repo and work with it directly:
+### Develop locally
 
 ```bash
 git clone https://github.com/your-org/hcp-dp.git
 cd hcp-dp
 cargo build
-```
-
-Run examples:
-
-```bash
-cargo run --example lcs
-cargo run --example align
-cargo run --example viterbi
-cargo run --example matrix_chain
 ```
 
 ### Requirements
@@ -182,19 +205,33 @@ cargo run --example matrix_chain
 - `python3` (used by `scripts/check_bench.py` during perf comparisons)
 - Optional: `cargo install grcov` + LLVM tools if you want local coverage reports
 
-### Testing & QA
+---
 
-- Smoke: `bash scripts/check.sh`
-- Heavy scale tests (`feature=heavy`): `cargo test --features heavy`
-- Parallel determinism (`feature=parallel`): `cargo test --features parallel --test parallel_equivalence`
-- Property/randomized suites:
-  - `cargo test --test lcs_banded_property`
-  - `cargo test --test nw_affine_property`
-  - `cargo test --test viterbi_degenerate`
-  - `cargo test --test dag_sp_random`
-- Benchmarks: `RUN_BENCH=1 bash scripts/check.sh` (Criterion with RSS logging, baseline in `perf/baseline.json`; adjust tolerance via `PERF_TOLERANCE`, enforce via `PERF_ENFORCE=1`; regenerate baselines only when running on stable hardware)
-- Coverage (optional): `RUSTFLAGS="-Zinstrument-coverage" LLVM_PROFILE_FILE="target/coverage/%p-%m.profraw" cargo test` followed by `grcov`
-- CI workflows in `.github/workflows/` cover lint/test matrices (Linux/macOS/Windows, MSRV), feature builds (`parallel`, `tracing`), coverage, and scheduled perf runs. See `CONTRIBUTING.md` for the contributor checklist.
+## Quickstart
+
+```bash
+git clone https://github.com/logannye/hcp-dp.git
+cd hcp-dp
+cargo run --example lcs            # try the LCS demo
+bash scripts/check.sh              # run fmt, clippy, tests, examples
+```
+
+Need an alignment example instead? Swap in `cargo run --example align` for Needleman–Wunsch or `cargo run --example viterbi` for HMM decoding.
+
+---
+
+## Testing & QA
+
+| Purpose | Command | Notes |
+|---------|---------|-------|
+| Smoke + lint + unit/integration | `bash scripts/check.sh` | runs fmt, clippy, build, tests, examples |
+| Heavy regression suite | `cargo test --features heavy` | expect long runtime / high memory |
+| Parallel determinism | `cargo test --features parallel --test parallel_equivalence` | checks Rayon feature for identical outputs |
+| Property/randomized tests | `cargo test --test lcs_banded_property`<br>`cargo test --test nw_affine_property`<br>`cargo test --test viterbi_degenerate`<br>`cargo test --test dag_sp_random` | powered by `proptest` |
+| Benchmarks | `RUN_BENCH=1 bash scripts/check.sh` | Criterion + RSS logging. Baselines live in `perf/baseline.json`; set `PERF_ENFORCE=1` to gate CI, `PERF_TOLERANCE` to tune thresholds |
+| Coverage (optional) | `RUSTFLAGS="-Zinstrument-coverage" LLVM_PROFILE_FILE="target/coverage/%p-%m.profraw" cargo test` | pair with `grcov` for HTML reports |
+
+The CI workflows in `.github/workflows/` mirror these checks across Linux, macOS, Windows, multiple toolchains, and feature combinations. See `CONTRIBUTING.md` for the full contributor checklist.
 
 ### Optional features
 
@@ -492,6 +529,15 @@ Potential extensions (PRs welcome if you end up using this):
   * DAG shortest paths with layered constraints.
 * Optional `no_std` + embedded / streaming support.
 * Integrations with bioinformatics / ML / verification ecosystems.
+
+---
+
+## Documentation & Support
+
+- **API & architecture**: start with this `README.md`, then explore inline rustdoc in `src/` (`cargo doc --open`).
+- **Contributor workflow**: refer to `CONTRIBUTING.md` for environment setup, testing expectations, and CI details.
+- **Issue tracking**: open GitHub issues for bugs, feature requests, or performance regressions. Include repro steps and DP dimensions.
+- **Discussions**: for research collaborations or integration questions, feel free to start a GitHub Discussion or reach out via issues; we welcome contributions.
 
 ---
 

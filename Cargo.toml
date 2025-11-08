@@ -1,0 +1,33 @@
+[package]
+name = "hcp-dp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Your Name <you@example.com>"]
+description = "Height-compressed dynamic programming engine and reference implementations."
+repository = "https://github.com/your-org/hcp-dp"
+readme = "README.md"
+keywords = ["dynamic-programming", "algorithms", "bioinformatics", "compression"]
+categories = ["algorithms", "science", "data-structures"]
+
+[lib]
+name = "hcp_dp"
+path = "src/lib.rs"
+
+[dependencies]
+rayon = { version = "1.10", optional = true }
+tracing = { version = "0.1", optional = true }
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+proptest = "1"
+sysinfo = "0.30"
+
+[[bench]]
+name = "large_align"
+harness = false
+
+[features]
+heavy = []
+parallel = ["rayon"]
+tracing = ["dep:tracing"]

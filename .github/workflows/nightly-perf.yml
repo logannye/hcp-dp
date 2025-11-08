@@ -1,0 +1,25 @@
+name: Nightly Perf
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      enforce:
+        description: "Fail the job on regression"
+        default: "0"
+        required: false
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run benches with baseline comparison
+        env:
+          RUN_BENCH: "1"
+          PERF_ENFORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enforce || '0' }}
+        run: |
+          bash scripts/check.sh
+

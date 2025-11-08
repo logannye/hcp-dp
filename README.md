@@ -1,8 +1,7 @@
 # Height-Compressed Dynamic Programming (HCP-DP)
 
-[![CI](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml/badge.svg)](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml)
-[![Nightly Benchmarks](https://github.com/logannye/hcp-dp/actions/workflows/nightly-perf.yml/badge.svg)](https://github.com/logannye/hcp-dp/actions/workflows/nightly-perf.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-b7410e?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Open Source: MIT](https://img.shields.io/badge/open%20source-MIT-0b7285.svg)](LICENSE)
 
 > Height-Compressed Dynamic Programming (HCP-DP) in Rust — run massive dynamic programs with exact answers and dramatically reduced memory.
 

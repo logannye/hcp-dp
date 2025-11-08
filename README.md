@@ -194,7 +194,7 @@ hcp-dp = { git = "https://github.com/logannye/hcp-dp", package = "hcp-dp" }
 ### Develop locally
 
 ```bash
-git clone https://github.com/your-org/hcp-dp.git
+git clone https://github.com/logannye/hcp-dp.git
 cd hcp-dp
 cargo build
 ```

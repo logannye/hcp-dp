@@ -28,17 +28,19 @@ jobs:
       - name: Cargo check (MSRV)
         run: cargo check --workspace --all-targets
 
-  feature-builds:
-    name: Feature Builds
+  feature-checks:
+    name: Feature Checks
     strategy:
       matrix:
-        feature: [parallel, tracing]
+        features: [parallel, tracing, "parallel tracing"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build with feature
-        run: cargo build --workspace --features ${{ matrix.feature }}
+      - name: Run check script with features
+        env:
+          FEATURES: ${{ matrix.features }}
+        run: bash scripts/check.sh
 
   coverage:
     name: Coverage

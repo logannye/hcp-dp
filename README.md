@@ -35,7 +35,7 @@ This repository packages height-compression algorithmic optimizations into a pro
 - **Generic engine**: drop-in `HcpEngine` orchestrates height-compressed DP for any problem that implements the `HcpProblem` trait.
 - **Reference implementations**: LCS (full and banded), Needleman–Wunsch (linear and affine gaps), Viterbi decoding, layered DAG shortest paths, matrix-chain multiplication.
 - **Safety and correctness**: rich unit, integration, and property tests; optional heavy stress and deterministic parallel equivalence suites.
-- **Performance tooling**: Criterion benchmarks with RSS tracking, perf baseline enforcement, and scheduled GitHub Actions runs.
+- **Performance tooling**: Criterion benchmarks with RSS tracking, perf baseline enforcement, scaling probe (tests up to 65536 elements), and scheduled GitHub Actions runs.
 - **Developer ergonomics**: builder API, feature flags (`parallel`, `tracing`, `heavy`), comprehensive CI, and contributor guide.
 
 ## What is this?
@@ -175,8 +175,10 @@ hcp-dp/
 │   ├─ align.rs
 │   ├─ matrix_chain.rs
 │   └─ viterbi.rs
-└─ benches/
-    └─ large_align.rs
+├─ benches/
+│   └─ large_align.rs
+└─ src/bin/
+    └─ scale_probe.rs        # Scaling performance probe (tests up to 65536 elements)
 ```
 
 ---
@@ -213,6 +215,7 @@ git clone https://github.com/logannye/hcp-dp.git
 cd hcp-dp
 cargo run --example lcs            # try the LCS demo
 bash scripts/check.sh              # run fmt, clippy, tests, examples
+cargo run --bin scale_probe        # test scaling performance (256 to 65536 elements)
 ```
 
 Need an alignment example instead? Swap in `cargo run --example align` for Needleman–Wunsch or `cargo run --example viterbi` for HMM decoding.
@@ -224,13 +227,16 @@ Need an alignment example instead? Swap in `cargo run --example align` for Needl
 | Purpose | Command | Notes |
 |---------|---------|-------|
 | Smoke + lint + unit/integration | `bash scripts/check.sh` | runs fmt, clippy, build, tests, examples |
+| Scaling performance probe | `cargo run --bin scale_probe` | tests all problem types from 256 to 65536 elements; verifies correctness against baselines and reports timing/memory; supports `--format csv\|table\|json` and `--verify-limit N` |
 | Heavy regression suite | `cargo test --features heavy` | expect long runtime / high memory |
 | Parallel determinism | `cargo test --features parallel --test parallel_equivalence` | checks Rayon feature for identical outputs |
 | Property/randomized tests | `cargo test --test lcs_banded_property`<br>`cargo test --test nw_affine_property`<br>`cargo test --test viterbi_degenerate`<br>`cargo test --test dag_sp_random` | powered by `proptest` |
-| Benchmarks | `RUN_BENCH=1 bash scripts/check.sh` | Criterion + RSS logging. Baselines live in `perf/baseline.json`; set `PERF_ENFORCE=1` to gate CI, `PERF_TOLERANCE` to tune thresholds |
+| Benchmarks | `RUN_BENCH=1 bash scripts/check.sh` | Criterion suites for throughput (alignment) and summary micro-ops (`summary_ops`). Baselines live in `perf/baseline.json`; set `PERF_ENFORCE=1` to gate CI, `PERF_TOLERANCE` to tune thresholds |
 | Coverage (optional) | `RUSTFLAGS="-Zinstrument-coverage" LLVM_PROFILE_FILE="target/coverage/%p-%m.profraw" cargo test` | pair with `grcov` for HTML reports |
 
 The CI workflows in `.github/workflows/` mirror these checks across Linux, macOS, Windows, multiple toolchains, and feature combinations. See `CONTRIBUTING.md` for the full contributor checklist.
+
+> Benchmarks also record summary-operator latency. After hardware or algorithmic changes, run `RUN_BENCH=1 PERF_ENFORCE=1 bash scripts/check.sh` locally and copy the resulting `perf/baseline.json` if you want new gate values.
 
 ### Optional features
 

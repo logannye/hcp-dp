@@ -7,7 +7,7 @@
 //! Here we show how to wrap it as an `HcpProblem`. For simplicity and clarity,
 //! we reconstruct a sequence of "split positions" as the path.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 
 /// Matrix-chain DP instance.
 #[derive(Clone)]
@@ -194,6 +194,12 @@ impl HcpProblem for MatrixChainProblem {
     fn extract_cost(&self, frontier_t: &Self::Frontier, _beta_t: &Self::Boundary) -> Self::Cost {
         let n = self.n();
         frontier_t.costs[1][n]
+    }
+}
+
+impl SummaryApply<McFrontier> for McSummary {
+    fn apply(&self, frontier: &McFrontier) -> McFrontier {
+        frontier.clone()
     }
 }
 

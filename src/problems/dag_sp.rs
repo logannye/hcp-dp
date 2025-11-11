@@ -2,14 +2,18 @@
 //! Graph structure: layers 0..=T, vertices per layer with edges only from layer i to i+1.
 //! Frontier: best distance per vertex in the current layer.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
+use std::sync::Arc;
+
+type SharedAdjacency = Arc<Vec<Vec<Vec<(usize, i64)>>>>;
+type SharedWidths = Arc<Vec<usize>>;
 
 #[derive(Clone)]
 pub struct DagLayered {
     /// adjacency[i][u] = Vec<(v, weight)> edges from layer i vertex u to layer i+1 vertex v
-    pub adjacency: Vec<Vec<Vec<(usize, i64)>>>,
+    pub adjacency: SharedAdjacency,
     /// number of vertices per layer
-    pub widths: Vec<usize>,
+    pub widths: SharedWidths,
 }
 
 #[derive(Clone, Debug)]
@@ -19,7 +23,10 @@ pub struct DagFrontier {
 
 #[derive(Clone, Debug)]
 pub struct DagSummary {
-    pub end_frontier: DagFrontier,
+    adjacency: SharedAdjacency,
+    widths: SharedWidths,
+    start: usize,
+    end: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,7 +48,10 @@ impl DagLayered {
             widths.len(),
             "adjacency for T layers, widths for T+1 layers"
         );
-        Self { adjacency, widths }
+        Self {
+            adjacency: Arc::new(adjacency),
+            widths: Arc::new(widths),
+        }
     }
     fn t(&self) -> usize {
         self.adjacency.len()
@@ -95,11 +105,33 @@ impl HcpProblem for DagLayered {
         for i in a..b {
             f = self.forward_step(i, &f);
         }
-        (f.clone(), DagSummary { end_frontier: f })
+        (
+            f.clone(),
+            DagSummary {
+                adjacency: Arc::clone(&self.adjacency),
+                widths: Arc::clone(&self.widths),
+                start: a,
+                end: b,
+            },
+        )
     }
 
-    fn merge_summary(&self, _left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
-        right.clone()
+    fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
+        debug_assert!(
+            Arc::ptr_eq(&left.adjacency, &right.adjacency),
+            "summaries must share adjacency"
+        );
+        debug_assert!(
+            Arc::ptr_eq(&left.widths, &right.widths),
+            "summaries must share widths"
+        );
+
+        DagSummary {
+            adjacency: Arc::clone(&left.adjacency),
+            widths: Arc::clone(&left.widths),
+            start: left.start,
+            end: right.end,
+        }
     }
 
     fn initial_boundary(&self) -> Self::Boundary {
@@ -152,6 +184,44 @@ impl HcpProblem for DagLayered {
         DagBoundary {
             layer: m,
             node: best,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn choose_boundary_with_frontiers(
+        &self,
+        _a: usize,
+        m: usize,
+        _c: usize,
+        _frontier_a: &Self::Frontier,
+        frontier_m_forward: &Self::Frontier,
+        frontier_m_backward: &Self::Frontier,
+        _frontier_c: &Self::Frontier,
+        _sigma_left: &Self::Summary,
+        _sigma_right: &Self::Summary,
+        _beta_a: &Self::Boundary,
+        _beta_c: &Self::Boundary,
+    ) -> Self::Boundary {
+        let mut best = i64::MAX / 4;
+        let mut best_node = 0usize;
+        for (idx, (&fwd, &bwd)) in frontier_m_forward
+            .dist
+            .iter()
+            .zip(&frontier_m_backward.dist)
+            .enumerate()
+        {
+            if fwd >= i64::MAX / 8 || bwd >= i64::MAX / 8 {
+                continue;
+            }
+            let total = fwd.saturating_add(bwd);
+            if total < best {
+                best = total;
+                best_node = idx;
+            }
+        }
+        DagBoundary {
+            layer: m,
+            node: best_node,
         }
     }
 
@@ -211,6 +281,55 @@ impl HcpProblem for DagLayered {
 
     fn extract_cost(&self, frontier_t: &Self::Frontier, beta_t: &Self::Boundary) -> Self::Cost {
         frontier_t.dist[beta_t.node]
+    }
+}
+
+impl SummaryApply<DagFrontier> for DagSummary {
+    fn apply(&self, frontier: &DagFrontier) -> DagFrontier {
+        if self.start == self.end {
+            return frontier.clone();
+        }
+        let mut current = frontier.dist.clone();
+        for layer in self.start..self.end {
+            let next_w = self.widths[layer + 1];
+            let mut next = vec![i64::MAX / 4; next_w];
+            for (u, &du) in current.iter().enumerate() {
+                if du >= i64::MAX / 8 {
+                    continue;
+                }
+                for &(v, w) in &self.adjacency[layer][u] {
+                    let cand = du.saturating_add(w);
+                    if cand < next[v] {
+                        next[v] = cand;
+                    }
+                }
+            }
+            current = next;
+        }
+        DagFrontier { dist: current }
+    }
+
+    fn apply_reverse(&self, frontier: &DagFrontier) -> DagFrontier {
+        if self.start == self.end {
+            return frontier.clone();
+        }
+        let mut current = frontier.dist.clone();
+        for layer in (self.start..self.end).rev() {
+            let prev_w = self.widths[layer];
+            let mut prev = vec![i64::MAX / 4; prev_w];
+            for (u, edges) in self.adjacency[layer].iter().enumerate() {
+                for &(v, w) in edges {
+                    if v < current.len() && current[v] < i64::MAX / 8 {
+                        let cand = current[v].saturating_add(w);
+                        if cand < prev[u] {
+                            prev[u] = cand;
+                        }
+                    }
+                }
+            }
+            current = prev;
+        }
+        DagFrontier { dist: current }
     }
 }
 

@@ -3,12 +3,13 @@
 //! This module illustrates how to use the engine for long-chain probabilistic
 //! models with small state spaces.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 use std::cmp::Ordering;
 use std::fmt;
+use std::sync::Arc;
 
 /// Hidden Markov Model with discrete states and emissions.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Hmm {
     /// Number of states.
     pub n_states: usize,
@@ -23,7 +24,7 @@ pub struct Hmm {
 /// Viterbi DP instance: fixed HMM + observation sequence.
 #[derive(Clone)]
 pub struct ViterbiProblem {
-    pub hmm: Hmm,
+    pub hmm: Arc<Hmm>,
     /// Observations as discrete symbols in 0..V.
     pub obs: Vec<usize>,
 }
@@ -36,8 +37,10 @@ pub struct VitFrontier {
 
 #[derive(Clone, Debug)]
 pub struct VitSummary {
-    // For demo: store the end frontier only.
-    pub end_frontier: VitFrontier,
+    hmm: Arc<Hmm>,
+    obs_tail: Vec<usize>,
+    start_layer: usize,
+    end_layer: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -86,7 +89,10 @@ impl fmt::Display for TotalF64 {
 impl ViterbiProblem {
     pub fn new(hmm: Hmm, obs: Vec<usize>) -> Self {
         assert_eq!(hmm.log_pi.len(), hmm.n_states);
-        Self { hmm, obs }
+        Self {
+            hmm: Arc::new(hmm),
+            obs,
+        }
     }
 
     fn t_len(&self) -> usize {
@@ -145,11 +151,36 @@ impl HcpProblem for ViterbiProblem {
         for layer in a..b {
             f = self.forward_step(layer, &f);
         }
-        (f.clone(), VitSummary { end_frontier: f })
+        let mut segment = Vec::with_capacity(b.saturating_sub(a));
+        let obs_len = self.obs.len();
+        for layer in a..b {
+            let t = layer + 1;
+            if t < obs_len {
+                segment.push(self.obs[t]);
+            }
+        }
+
+        (
+            f.clone(),
+            VitSummary {
+                hmm: Arc::clone(&self.hmm),
+                obs_tail: segment,
+                start_layer: a,
+                end_layer: b,
+            },
+        )
     }
 
-    fn merge_summary(&self, _left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
-        right.clone()
+    fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
+        debug_assert!(Arc::ptr_eq(&left.hmm, &right.hmm), "HMM must match");
+        let mut obs_tail = left.obs_tail.clone();
+        obs_tail.extend(&right.obs_tail);
+        VitSummary {
+            hmm: Arc::clone(&left.hmm),
+            obs_tail,
+            start_layer: left.start_layer,
+            end_layer: right.end_layer,
+        }
     }
 
     fn initial_boundary(&self) -> Self::Boundary {
@@ -260,6 +291,41 @@ impl HcpProblem for ViterbiProblem {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn choose_boundary_with_frontiers(
+        &self,
+        _a: usize,
+        m: usize,
+        _c: usize,
+        _frontier_a: &Self::Frontier,
+        frontier_m_forward: &Self::Frontier,
+        frontier_m_backward: &Self::Frontier,
+        _frontier_c: &Self::Frontier,
+        _sigma_left: &Self::Summary,
+        _sigma_right: &Self::Summary,
+        _beta_a: &Self::Boundary,
+        _beta_c: &Self::Boundary,
+    ) -> Self::Boundary {
+        let n = self.hmm.n_states;
+        let forward = &frontier_m_forward.log_delta;
+        let backward = &frontier_m_backward.log_delta;
+        let mut best_state = 0;
+        let mut best = f64::NEG_INFINITY;
+
+        for state in 0..n {
+            let cand = forward[state] + backward[state];
+            if cand > best {
+                best = cand;
+                best_state = state;
+            }
+        }
+
+        VitBoundary {
+            t: m,
+            state: best_state,
+        }
+    }
+
     fn reconstruct_block(
         &self,
         a: usize,
@@ -329,10 +395,68 @@ impl HcpProblem for ViterbiProblem {
     }
 }
 
+impl SummaryApply<VitFrontier> for VitSummary {
+    fn apply(&self, frontier: &VitFrontier) -> VitFrontier {
+        if self.obs_tail.is_empty() {
+            return frontier.clone();
+        }
+        let hmm = &self.hmm;
+        let n = hmm.n_states;
+        let mut prev = frontier.log_delta.clone();
+        let mut next = vec![f64::NEG_INFINITY; n];
+
+        for &obs_sym in &self.obs_tail {
+            next.iter_mut().for_each(|val| *val = f64::NEG_INFINITY);
+            for (s_to, next_val) in next.iter_mut().enumerate().take(n) {
+                let emit = hmm.log_b[s_to][obs_sym];
+                let mut best = f64::NEG_INFINITY;
+                for (s_from, &prev_val) in prev.iter().enumerate().take(n) {
+                    let cand = prev_val + hmm.log_a[s_from][s_to] + emit;
+                    if cand > best {
+                        best = cand;
+                    }
+                }
+                *next_val = best;
+            }
+            std::mem::swap(&mut prev, &mut next);
+        }
+
+        VitFrontier { log_delta: prev }
+    }
+
+    fn apply_reverse(&self, frontier: &VitFrontier) -> VitFrontier {
+        if self.obs_tail.is_empty() {
+            return frontier.clone();
+        }
+        let hmm = &self.hmm;
+        let n = hmm.n_states;
+        let mut prev = frontier.log_delta.clone();
+        let mut next = vec![f64::NEG_INFINITY; n];
+
+        for &obs_sym in self.obs_tail.iter().rev() {
+            next.iter_mut().for_each(|val| *val = f64::NEG_INFINITY);
+            for (s_from, next_val) in next.iter_mut().enumerate().take(n) {
+                let mut best = f64::NEG_INFINITY;
+                for (s_to, &prev_val) in prev.iter().enumerate().take(n) {
+                    let cand = hmm.log_a[s_from][s_to] + hmm.log_b[s_to][obs_sym] + prev_val;
+                    if cand > best {
+                        best = cand;
+                    }
+                }
+                *next_val = best;
+            }
+            std::mem::swap(&mut prev, &mut next);
+        }
+
+        VitFrontier { log_delta: prev }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::HcpEngine;
+    use std::sync::Arc;
 
     #[test]
     fn totalf64_ordering() {
@@ -353,7 +477,8 @@ mod tests {
             log_b: vec![vec![0.0, 0.0]; 2], // will be overridden below
         };
         let mut p = ViterbiProblem::new(hmm, vec![0]);
-        p.hmm.log_b = vec![vec![0.0, -1.0], vec![0.0, -2.0]];
+        let hmm_mut = Arc::make_mut(&mut p.hmm);
+        hmm_mut.log_b = vec![vec![0.0, -1.0], vec![0.0, -2.0]];
         let f = p.init_frontier();
         assert_eq!(f.log_delta.len(), 2);
         assert!(f.log_delta[0].is_finite());

@@ -10,7 +10,7 @@
 //! Boundaries are DP coordinates (row, col). The reconstruction returns a path
 //! of (i,j) states along some optimal LCS path.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 
 #[derive(Clone)]
 pub struct LcsProblem<'a> {
@@ -30,8 +30,11 @@ pub struct LcsFrontier {
 /// More sophisticated summaries can cache additional info, but this suffices
 /// for correctness since `choose_boundary` is allowed to recompute locally.
 #[derive(Clone, Debug)]
-pub struct LcsSummary {
-    pub end_frontier: LcsFrontier,
+pub struct LcsSummary<'a> {
+    s: &'a [u8],
+    t: &'a [u8],
+    start: usize,
+    end: usize,
 }
 
 /// Boundary condition: fixed DP cell (row, col).
@@ -65,7 +68,7 @@ impl<'a> LcsProblem<'a> {
 impl<'a> HcpProblem for LcsProblem<'a> {
     type State = LcsState;
     type Frontier = LcsFrontier;
-    type Summary = LcsSummary;
+    type Summary = LcsSummary<'a>;
     type Boundary = LcsBoundary;
     type Cost = u32;
 
@@ -108,13 +111,33 @@ impl<'a> HcpProblem for LcsProblem<'a> {
         for layer in a..b {
             f = self.forward_step(layer, &f);
         }
-        (f.clone(), LcsSummary { end_frontier: f })
+        (
+            f.clone(),
+            LcsSummary {
+                s: self.s,
+                t: self.t,
+                start: a,
+                end: b,
+            },
+        )
     }
 
-    fn merge_summary(&self, _left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
-        // For LCS, we only need the end frontier; composition is effectively:
-        // Σ[a,c].end_frontier = Σ[b,c].end_frontier when used hierarchically.
-        right.clone()
+    fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
+        // Merge adjacent intervals by widening the covered range.
+        debug_assert!(
+            std::ptr::eq(left.s, right.s),
+            "summaries must originate from same source string"
+        );
+        debug_assert!(
+            std::ptr::eq(left.t, right.t),
+            "summaries must share the same target string"
+        );
+        LcsSummary {
+            s: right.s,
+            t: right.t,
+            start: left.start,
+            end: right.end,
+        }
     }
 
     fn initial_boundary(&self) -> Self::Boundary {
@@ -174,6 +197,42 @@ impl<'a> HcpProblem for LcsProblem<'a> {
         LcsBoundary {
             row: m,
             col: p + best_j,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn choose_boundary_with_frontiers(
+        &self,
+        _a: usize,
+        m: usize,
+        _c: usize,
+        _frontier_a: &Self::Frontier,
+        frontier_m_forward: &Self::Frontier,
+        frontier_m_backward: &Self::Frontier,
+        _frontier_c: &Self::Frontier,
+        _sigma_left: &Self::Summary,
+        _sigma_right: &Self::Summary,
+        beta_a: &Self::Boundary,
+        beta_c: &Self::Boundary,
+    ) -> Self::Boundary {
+        let p = beta_a.col;
+        let q = beta_c.col;
+        let forward = &frontier_m_forward.scores;
+        let backward = &frontier_m_backward.scores;
+
+        let mut best_j = p;
+        let mut best_val = u32::MIN;
+        for j in p..=q {
+            let val = forward[j] + backward[j];
+            if val > best_val {
+                best_val = val;
+                best_j = j;
+            }
+        }
+
+        LcsBoundary {
+            row: m,
+            col: best_j,
         }
     }
 
@@ -239,6 +298,43 @@ impl<'a> HcpProblem for LcsProblem<'a> {
     fn extract_cost(&self, frontier_t: &Self::Frontier, _beta_t: &Self::Boundary) -> Self::Cost {
         // Global LCS length at (n,m).
         *frontier_t.scores.last().unwrap_or(&0)
+    }
+}
+
+impl<'a> SummaryApply<LcsFrontier> for LcsSummary<'a> {
+    fn apply(&self, frontier: &LcsFrontier) -> LcsFrontier {
+        let t = self.t;
+        let mut prev = frontier.scores.clone();
+        let mut curr = vec![0u32; prev.len()];
+        for &ch in &self.s[self.start..self.end] {
+            curr[0] = 0;
+            for j in 1..=t.len() {
+                let up = prev[j];
+                let left = curr[j - 1];
+                let diag = prev[j - 1] + if t[j - 1] == ch { 1 } else { 0 };
+                curr[j] = up.max(left).max(diag);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        LcsFrontier { scores: prev }
+    }
+
+    fn apply_reverse(&self, frontier: &LcsFrontier) -> LcsFrontier {
+        let t = self.t;
+        let mut prev = frontier.scores.clone();
+        let mut curr = vec![0u32; prev.len()];
+        for &ch in self.s[self.start..self.end].iter().rev() {
+            let last = curr.len() - 1;
+            curr[last] = 0;
+            for j in (0..t.len()).rev() {
+                let down = prev[j];
+                let right = curr[j + 1];
+                let diag = prev[j + 1] + if t[j] == ch { 1 } else { 0 };
+                curr[j] = down.max(right).max(diag);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        LcsFrontier { scores: prev }
     }
 }
 

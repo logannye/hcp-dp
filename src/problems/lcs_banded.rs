@@ -3,7 +3,7 @@
 //! Note: For too-narrow bands the result can be suboptimal; with wide enough
 //! bands (>= |n - m| plus slack), it matches full LCS.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 
 #[derive(Clone)]
 pub struct LcsBandedProblem<'a> {
@@ -196,6 +196,12 @@ impl<'a> HcpProblem for LcsBandedProblem<'a> {
 
     fn extract_cost(&self, frontier_t: &Self::Frontier, _beta_t: &Self::Boundary) -> Self::Cost {
         *frontier_t.scores.last().unwrap_or(&0)
+    }
+}
+
+impl SummaryApply<LbFrontier> for LbSummary {
+    fn apply(&self, _frontier: &LbFrontier) -> LbFrontier {
+        self.end_frontier.clone()
     }
 }
 

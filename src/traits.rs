@@ -14,18 +14,56 @@
 //! using only these primitives. Implementations are free to recompute within
 //! blocks as needed, as long as they adhere to the asymptotic space constraints.
 
+/// Trait implemented by interval summaries Σ[a,b] so they can be applied to a frontier.
+///
+/// The whitepaper requires *boundary-independent* summaries: Σ[a,b] depends
+/// only on the DP structure between layers `a` and `b`. Applying the summary
+/// to a frontier representing layer `a` must yield the corresponding frontier
+/// at `b` as if the DP had been run locally.
+pub trait SummaryApply<Frontier> {
+    /// Apply the summary to an input frontier to obtain the output frontier.
+    ///
+    /// Implementations should be side-effect free and must not mutate the input.
+    /// The result should match a direct execution of the DP over the interval.
+    fn apply(&self, frontier: &Frontier) -> Frontier;
+
+    /// Apply the summary in reverse, propagating information from the interval's
+    /// end back to its start.
+    ///
+    /// The default implementation clones the input frontier, which is useful for
+    /// problems that do not require reverse propagation.
+    fn apply_reverse(&self, frontier: &Frontier) -> Frontier
+    where
+        Frontier: Clone,
+    {
+        frontier.clone()
+    }
+}
+
 /// Trait for a height-compressible dynamic program instance.
 ///
 /// An `HcpProblem` corresponds to a *fixed* DP instance:
-/// in practice, a struct containing input data (sequences, dimensions, graph, etc.).
+/// typically a struct containing immutable input data (sequences, matrices,
+/// graph layers, emission tables, …).
 ///
-/// Semantics:
-/// - There are `T = num_layers()` *steps* (or layers).
-/// - We conceptually maintain a "frontier" of DP values at each layer.
-/// - `forward_step(i, frontier)` maps layer `i` -> layer `i+1`.
-/// - After T steps, we have a final frontier at layer T.
-/// - Boundaries and summaries are used only by the generic engine; you control
-///   how they are interpreted.
+/// # Contract
+/// Implementations must guarantee:
+///
+/// - `num_layers()` equals the number of forward steps needed to reach the
+///   terminal frontier. Layers are indexed `0..=T`.
+/// - `forward_step(i, frontier)` consumes layer `i` and returns the frontier for
+///   layer `i + 1` without mutating the input frontier.
+/// - `summarize_block(a, b, frontier_a)` is equivalent to iterating
+///   `forward_step` for `layer = a..b-1`, yielding both the frontier at `b` and
+///   a boundary-independent summary Σ[a,b].
+/// - `merge_summary` is associative: for adjacent blocks `[a,b)`, `[b,c)`,
+///   `[c,d)` we expect `Σ[a,b] ⊕ (Σ[b,c] ⊕ Σ[c,d]) == (Σ[a,b] ⊕ Σ[b,c]) ⊕ Σ[c,d]`
+///   and applying either side to a frontier produces the same result.
+/// - `choose_boundary` (or `choose_boundary_with_frontiers`) always returns a
+///   boundary that is consistent with at least one globally optimal solution,
+///   ensuring recursive reconstruction terminates.
+///
+/// Violating these invariants will cause panics or incorrect reconstructions.
 pub trait HcpProblem {
     /// A single state along the reconstructed optimal path.
     /// For sequence DPs, often `(i,j)` indices; for others, a vertex id, etc.
@@ -36,9 +74,10 @@ pub trait HcpProblem {
 
     /// Interval summary type Σ[a,b].
     ///
-    /// This should be compact (typically O(frontier_size)) and support an
-    /// associative merge operation via [`merge_summary`].
-    type Summary: Clone;
+    /// The summary must be boundary-independent, support the associative merge
+    /// operator defined by [`merge_summary`], and be able to advance any
+    /// compatible frontier by calling [`SummaryApply::apply`].
+    type Summary: Clone + SummaryApply<Self::Frontier>;
 
     /// Boundary condition at a layer.
     ///
@@ -57,21 +96,29 @@ pub trait HcpProblem {
     /// - initialize a frontier at layer 0,
     /// - apply `forward_step` for i = 0..T-1,
     /// - obtain final frontier at layer T.
+    ///
+    /// Return the total number of DP layers (T).
+    ///
+    /// The engine performs exactly `T` calls to [`forward_step`](Self::forward_step)
+    /// during the forward phase.
     fn num_layers(&self) -> usize;
 
     /// Initialize the frontier at layer 0.
+    ///
+    /// Initialise the frontier at layer 0. Must be side-effect free.
     fn init_frontier(&self) -> Self::Frontier;
 
     /// Perform one DP step: from layer `i` to `i+1`.
     ///
+    ///
     /// Requirements:
-    /// - Must only depend on `frontier_i` and fixed problem data.
-    /// - Must run in O(W) space, where W is frontier width.
+    /// - May only depend on `frontier_i` and immutable problem data.
+    /// - Must run in O(W) space, where W is the frontier width.
     fn forward_step(&self, layer: usize, frontier_i: &Self::Frontier) -> Self::Frontier;
 
     /// Summarize a block of layers [a, b).
     ///
-    /// Repeatedly calls `forward_step` from layer a to b, using only O(W) space,
+    /// Repeatedly calls `forward_step` from layer `a` to `b`, using only O(W) space,
     /// and returns:
     /// - the resulting frontier at layer b, and
     /// - a summary Σ[a,b] capturing the effect of this interval.
@@ -86,7 +133,8 @@ pub trait HcpProblem {
     ///
     /// Given Σ[a,b] and Σ[b,c], return Σ[a,c] = Σ[a,b] ⊕ Σ[b,c].
     ///
-    /// This operator must be associative across chains of blocks.
+    /// This operator must be associative across chains of blocks and the
+    /// returned summary must satisfy the same [`SummaryApply::apply`] law.
     fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary;
 
     /// Boundary condition at layer 0 representing the initial constraint.
@@ -124,6 +172,28 @@ pub trait HcpProblem {
         beta_a: &Self::Boundary,
         beta_c: &Self::Boundary,
     ) -> Self::Boundary;
+
+    /// Optional hook that receives forward/backward frontiers derived from Σ and
+    /// can be used to select the midpoint boundary without local recomputation.
+    ///
+    /// The default implementation falls back to [`choose_boundary`].
+    #[allow(clippy::too_many_arguments)]
+    fn choose_boundary_with_frontiers(
+        &self,
+        a: usize,
+        m: usize,
+        c: usize,
+        _frontier_a: &Self::Frontier,
+        _frontier_m_forward: &Self::Frontier,
+        _frontier_m_backward: &Self::Frontier,
+        _frontier_c: &Self::Frontier,
+        sigma_left: &Self::Summary,
+        sigma_right: &Self::Summary,
+        beta_a: &Self::Boundary,
+        beta_c: &Self::Boundary,
+    ) -> Self::Boundary {
+        self.choose_boundary(a, m, c, sigma_left, sigma_right, beta_a, beta_c)
+    }
 
     /// Reconstruct an optimal subpath on [a,b] under boundary conditions.
     ///

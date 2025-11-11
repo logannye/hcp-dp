@@ -1,6 +1,7 @@
 #![cfg(feature = "parallel")]
 
 use hcp_dp::{
+    builder::HcpEngineBuilder,
     problems::{
         dag_sp::DagLayered,
         lcs::LcsProblem,
@@ -123,9 +124,14 @@ proptest! {
     fn lcs_parallel_matches_baseline(a in "[ACGT]{0,10}", b in "[ACGT]{0,10}") {
         let s = a.as_bytes();
         let t = b.as_bytes();
-        let (cost, path) = HcpEngine::new(LcsProblem::new(s, t)).run();
-        prop_assert_eq!(cost, full_lcs(s, t));
-        prop_assert_eq!(path.first(), Some(&(0, 0)));
+        let serial = HcpEngine::new(LcsProblem::new(s, t)).run();
+        let parallel = HcpEngineBuilder::new(LcsProblem::new(s, t)).build().run();
+        prop_assert_eq!(serial.0, full_lcs(s, t));
+        if !serial.1.is_empty() {
+            prop_assert_eq!(serial.1.first(), Some(&(0, 0)));
+        }
+        prop_assert_eq!(serial.0, parallel.0);
+        prop_assert_eq!(serial.1, parallel.1);
     }
 
     #[test]
@@ -135,8 +141,12 @@ proptest! {
         let ms = 1;
         let mm = 1;
         let gp = -1;
-        let (cost, _path) = HcpEngine::new(NwProblem::new(s, t, ms, mm, gp)).run();
-        prop_assert_eq!(cost, full_nw(s, t, ms, mm, gp));
+        let serial = HcpEngine::new(NwProblem::new(s, t, ms, mm, gp)).run();
+        let parallel = HcpEngineBuilder::new(NwProblem::new(s, t, ms, mm, gp))
+            .build()
+            .run();
+        prop_assert_eq!(serial.0, full_nw(s, t, ms, mm, gp));
+        prop_assert_eq!(serial.0, parallel.0);
     }
 
     #[test]
@@ -169,9 +179,13 @@ proptest! {
             adjacency.push(layer_edges);
         }
         let baseline = topo_relax(&adjacency, &widths);
-        let (cost, _path) = HcpEngine::new(DagLayered::new(adjacency, widths.clone())).run();
+        let serial = HcpEngine::new(DagLayered::new(adjacency.clone(), widths.clone())).run();
+        let parallel = HcpEngineBuilder::new(DagLayered::new(adjacency, widths.clone()))
+            .build()
+            .run();
         let best = *baseline.iter().min().unwrap();
-        prop_assert_eq!(cost, best);
+        prop_assert_eq!(serial.0, best);
+        prop_assert_eq!(parallel.0, best);
     }
 }
 

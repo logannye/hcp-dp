@@ -3,10 +3,18 @@ use hcp_dp::{problems::lcs::LcsProblem, HcpEngine};
 #[test]
 fn zero_layers_no_op() {
     struct EmptyProblem;
+    #[derive(Clone)]
+    struct UnitSummary;
+    #[allow(clippy::unused_unit)]
+    impl hcp_dp::traits::SummaryApply<()> for UnitSummary {
+        fn apply(&self, frontier: &()) -> () {
+            *frontier
+        }
+    }
     impl hcp_dp::HcpProblem for EmptyProblem {
         type State = usize;
         type Frontier = ();
-        type Summary = ();
+        type Summary = UnitSummary;
         type Boundary = usize;
         type Cost = i32;
         fn num_layers(&self) -> usize {
@@ -20,9 +28,11 @@ fn zero_layers_no_op() {
             _b: usize,
             frontier_a: &Self::Frontier,
         ) -> (Self::Frontier, Self::Summary) {
-            (*frontier_a, ())
+            (*frontier_a, UnitSummary)
         }
-        fn merge_summary(&self, _left: &Self::Summary, _right: &Self::Summary) -> Self::Summary {}
+        fn merge_summary(&self, _left: &Self::Summary, _right: &Self::Summary) -> Self::Summary {
+            UnitSummary
+        }
         fn initial_boundary(&self) -> Self::Boundary {
             0
         }

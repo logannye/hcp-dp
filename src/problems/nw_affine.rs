@@ -6,7 +6,7 @@
 //! - gap_open_penalty (added when opening a gap; typically negative)
 //! - gap_extend_penalty (added when extending a gap; typically negative)
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 
 #[derive(Clone)]
 pub struct NwAffineProblem<'a> {
@@ -388,6 +388,12 @@ impl<'a> HcpProblem for NwAffineProblem<'a> {
         .iter()
         .max()
         .unwrap()
+    }
+}
+
+impl SummaryApply<NwAffFrontier> for NwAffSummary {
+    fn apply(&self, _frontier: &NwAffFrontier) -> NwAffFrontier {
+        self.end_frontier.clone()
     }
 }
 

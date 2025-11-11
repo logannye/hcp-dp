@@ -5,7 +5,7 @@
 //! - scoring with match/mismatch/gap penalties,
 //! - exact optimal alignment path reconstruction.
 
-use crate::traits::HcpProblem;
+use crate::traits::{HcpProblem, SummaryApply};
 
 #[derive(Clone)]
 pub struct NwProblem<'a> {
@@ -22,8 +22,14 @@ pub struct NwFrontier {
 }
 
 #[derive(Clone, Debug)]
-pub struct NwSummary {
-    pub end_frontier: NwFrontier,
+pub struct NwSummary<'a> {
+    s: &'a [u8],
+    t: &'a [u8],
+    start: usize,
+    end: usize,
+    match_score: i32,
+    mismatch_penalty: i32,
+    gap_penalty: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,7 +77,7 @@ impl<'a> NwProblem<'a> {
 impl<'a> HcpProblem for NwProblem<'a> {
     type State = NwState;
     type Frontier = NwFrontier;
-    type Summary = NwSummary;
+    type Summary = NwSummary<'a>;
     type Boundary = NwBoundary;
     type Cost = i32;
 
@@ -118,11 +124,43 @@ impl<'a> HcpProblem for NwProblem<'a> {
         for i in a..b {
             f = self.forward_step(i, &f);
         }
-        (f.clone(), NwSummary { end_frontier: f })
+        (
+            f.clone(),
+            NwSummary {
+                s: self.s,
+                t: self.t,
+                start: a,
+                end: b,
+                match_score: self.match_score,
+                mismatch_penalty: self.mismatch_penalty,
+                gap_penalty: self.gap_penalty,
+            },
+        )
     }
 
-    fn merge_summary(&self, _left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
-        right.clone()
+    fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
+        debug_assert!(
+            std::ptr::eq(left.s, right.s),
+            "summaries must use the same source string"
+        );
+        debug_assert!(
+            std::ptr::eq(left.t, right.t),
+            "summaries must use the same target string"
+        );
+        debug_assert_eq!(
+            (left.match_score, left.mismatch_penalty, left.gap_penalty),
+            (right.match_score, right.mismatch_penalty, right.gap_penalty),
+            "summaries must agree on scoring"
+        );
+        NwSummary {
+            s: left.s,
+            t: left.t,
+            start: left.start,
+            end: right.end,
+            match_score: left.match_score,
+            mismatch_penalty: left.mismatch_penalty,
+            gap_penalty: left.gap_penalty,
+        }
     }
 
     fn initial_boundary(&self) -> Self::Boundary {
@@ -191,6 +229,44 @@ impl<'a> HcpProblem for NwProblem<'a> {
         NwBoundary {
             row: m,
             col: p + best_j,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn choose_boundary_with_frontiers(
+        &self,
+        _a: usize,
+        m: usize,
+        _c: usize,
+        _frontier_a: &Self::Frontier,
+        frontier_m_forward: &Self::Frontier,
+        frontier_m_backward: &Self::Frontier,
+        _frontier_c: &Self::Frontier,
+        _sigma_left: &Self::Summary,
+        _sigma_right: &Self::Summary,
+        beta_a: &Self::Boundary,
+        beta_c: &Self::Boundary,
+    ) -> Self::Boundary {
+        let p = beta_a.col;
+        let q = beta_c.col;
+
+        let forward = &frontier_m_forward.scores;
+        let backward = &frontier_m_backward.scores;
+
+        let mut best_val = i32::MIN;
+        let mut best_col = p;
+
+        for j in p..=q {
+            let cand = forward[j] + backward[j];
+            if cand > best_val {
+                best_val = cand;
+                best_col = j;
+            }
+        }
+
+        NwBoundary {
+            row: m,
+            col: best_col,
         }
     }
 
@@ -263,6 +339,55 @@ impl<'a> HcpProblem for NwProblem<'a> {
 
     fn extract_cost(&self, frontier_t: &Self::Frontier, _beta_t: &Self::Boundary) -> Self::Cost {
         *frontier_t.scores.last().unwrap_or(&0)
+    }
+}
+
+impl<'a> SummaryApply<NwFrontier> for NwSummary<'a> {
+    fn apply(&self, frontier: &NwFrontier) -> NwFrontier {
+        let mut prev = frontier.scores.clone();
+        let mut curr = vec![0i32; prev.len()];
+
+        for &ch_s in &self.s[self.start..self.end] {
+            curr[0] = prev[0] + self.gap_penalty;
+            for j in 1..=self.t.len() {
+                let score = if ch_s == self.t[j - 1] {
+                    self.match_score
+                } else {
+                    -self.mismatch_penalty
+                };
+                let diag = prev[j - 1] + score;
+                let up = prev[j] + self.gap_penalty;
+                let left = curr[j - 1] + self.gap_penalty;
+                curr[j] = diag.max(up).max(left);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+
+        NwFrontier { scores: prev }
+    }
+
+    fn apply_reverse(&self, frontier: &NwFrontier) -> NwFrontier {
+        let mut prev = frontier.scores.clone();
+        let mut curr = vec![0i32; prev.len()];
+
+        for &ch_s in self.s[self.start..self.end].iter().rev() {
+            let last = curr.len() - 1;
+            curr[last] = prev[last] + self.gap_penalty;
+            for j in (0..self.t.len()).rev() {
+                let score = if ch_s == self.t[j] {
+                    self.match_score
+                } else {
+                    -self.mismatch_penalty
+                };
+                let down = prev[j];
+                let right = curr[j + 1] + self.gap_penalty;
+                let diag = prev[j + 1] + score;
+                curr[j] = down.max(right).max(diag);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+
+        NwFrontier { scores: prev }
     }
 }
 

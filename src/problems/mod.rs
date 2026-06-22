@@ -4,4 +4,5 @@
 //! exported from this module.
 
 pub mod lcs;
+pub mod nw_affine;
 pub mod nw_align;

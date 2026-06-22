@@ -21,10 +21,11 @@ The crate currently exports:
 - `SummaryApply`
 - `problems::lcs::LcsProblem`
 - `problems::nw_align::NwProblem`
+- `problems::nw_affine::NwAffineProblem`
 
-Former examples for affine gaps, banded LCS, Viterbi, DAG shortest path, and
-matrix-chain multiplication were removed from the public surface. They should be
-reintroduced only after passing the same contract harness.
+Former examples for banded LCS, Viterbi, DAG shortest path, and matrix-chain
+multiplication were removed from the public surface. They should be reintroduced
+only after passing the same contract harness.
 
 ## Capability Matrix
 
@@ -32,6 +33,7 @@ reintroduced only after passing the same contract harness.
 |---------|------------|------------|--------------|--------------------|-------------|
 | LCS | yes | yes | yes | no | smoke only |
 | Needleman-Wunsch, linear gap | yes | yes | yes | no | smoke only |
+| Needleman-Wunsch, affine gap | yes | yes | yes | no | smoke only |
 
 Performance baselines are not enforced yet. Correctness comes first.
 
@@ -104,6 +106,9 @@ let (cost, path) = HcpEngine::new(problem.clone()).run();
 assert_eq!(cost, 1);
 assert_eq!(problem.score_path(&path), Some(cost));
 ```
+
+Affine-gap alignment uses Gotoh state semantics. The first position in a gap
+costs `gap_open + gap_extend`; each continued gap position costs `gap_extend`.
 
 ## Development Checks
 

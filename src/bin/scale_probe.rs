@@ -2,10 +2,12 @@ use std::env;
 use std::time::Instant;
 
 use hcp_dp::{
-    problems::{lcs::LcsProblem, nw_align::NwProblem},
+    problems::{lcs::LcsProblem, nw_affine::NwAffineProblem, nw_align::NwProblem},
     HcpEngine,
 };
 use sysinfo::{get_current_pid, ProcessRefreshKind, System};
+
+const AFFINE_NEG_INF: i32 = i32::MIN / 4;
 
 fn main() {
     let options = match Options::parse(env::args().skip(1)) {
@@ -25,6 +27,7 @@ fn main() {
     let mut measurements = Vec::new();
     measurements.extend(run_lcs(&options, &mut sys));
     measurements.extend(run_nw(&options, &mut sys));
+    measurements.extend(run_affine_nw(&options, &mut sys));
 
     if measurements
         .iter()
@@ -182,10 +185,18 @@ fn run_lcs(options: &Options, sys: &mut System) -> Vec<Measurement> {
                         )
                     }
                 } else {
-                    (
-                        VerificationStatus::NotChecked,
-                        format!("cost={cost}, path_len={}", path.len()),
-                    )
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(cost) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("cost={cost}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
                 }
             })
         })
@@ -218,10 +229,76 @@ fn run_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
                         )
                     }
                 } else {
-                    (
-                        VerificationStatus::NotChecked,
-                        format!("cost={cost}, path_len={}", path.len()),
-                    )
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(cost) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("cost={cost}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                }
+            })
+        })
+        .collect()
+}
+
+fn run_affine_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    const SIZES: &[usize] = &[32, 64, 128, 256, 512];
+    const MATCH_SCORE: i32 = 2;
+    const MISMATCH_PENALTY: i32 = 1;
+    const GAP_OPEN: i32 = -3;
+    const GAP_EXTEND: i32 = -1;
+    SIZES
+        .iter()
+        .map(|&len| {
+            measure("needleman_wunsch_affine", len, sys, || {
+                let s = deterministic_dna(len);
+                let t = deterministic_dna_offset(len, 3);
+                let problem = NwAffineProblem::new(
+                    &s,
+                    &t,
+                    MATCH_SCORE,
+                    MISMATCH_PENALTY,
+                    GAP_OPEN,
+                    GAP_EXTEND,
+                );
+                let (cost, path) = HcpEngine::new(problem.clone()).run();
+                if len <= options.verify_limit {
+                    let baseline = full_affine_nw_score(
+                        &s,
+                        &t,
+                        MATCH_SCORE,
+                        MISMATCH_PENALTY,
+                        GAP_OPEN,
+                        GAP_EXTEND,
+                    );
+                    let path_score = problem.score_path(&path);
+                    if baseline == cost && path_score == Some(cost) {
+                        (VerificationStatus::Passed, format!("cost={cost}"))
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("baseline={baseline}, cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                } else {
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(cost) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("cost={cost}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
                 }
             })
         })
@@ -302,6 +379,100 @@ fn full_nw_score(s: &[u8], t: &[u8], match_score: i32, mismatch_penalty: i32, ga
         std::mem::swap(&mut prev, &mut curr);
     }
     prev[t.len()]
+}
+
+fn full_affine_nw_score(
+    s: &[u8],
+    t: &[u8],
+    match_score: i32,
+    mismatch_penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+) -> i32 {
+    let mut prev_m = vec![AFFINE_NEG_INF; t.len() + 1];
+    let mut prev_gap_t = vec![AFFINE_NEG_INF; t.len() + 1];
+    let mut prev_gap_s = vec![AFFINE_NEG_INF; t.len() + 1];
+    prev_m[0] = 0;
+    for j in 1..=t.len() {
+        prev_gap_s[j] = affine_best_gap(
+            prev_m[j - 1],
+            prev_gap_t[j - 1],
+            prev_gap_s[j - 1],
+            false,
+            gap_open,
+            gap_extend,
+        );
+    }
+
+    for &a in s {
+        let mut curr_m = vec![AFFINE_NEG_INF; t.len() + 1];
+        let mut curr_gap_t = vec![AFFINE_NEG_INF; t.len() + 1];
+        let mut curr_gap_s = vec![AFFINE_NEG_INF; t.len() + 1];
+
+        curr_gap_t[0] = affine_best_gap(
+            prev_m[0],
+            prev_gap_t[0],
+            prev_gap_s[0],
+            true,
+            gap_open,
+            gap_extend,
+        );
+
+        for j in 1..=t.len() {
+            let pair = if a == t[j - 1] {
+                match_score
+            } else {
+                -mismatch_penalty
+            };
+            curr_m[j] = affine_add(prev_m[j - 1], pair)
+                .max(affine_add(prev_gap_t[j - 1], pair))
+                .max(affine_add(prev_gap_s[j - 1], pair));
+            curr_gap_t[j] = affine_best_gap(
+                prev_m[j],
+                prev_gap_t[j],
+                prev_gap_s[j],
+                true,
+                gap_open,
+                gap_extend,
+            );
+            curr_gap_s[j] = affine_best_gap(
+                curr_m[j - 1],
+                curr_gap_t[j - 1],
+                curr_gap_s[j - 1],
+                false,
+                gap_open,
+                gap_extend,
+            );
+        }
+
+        prev_m = curr_m;
+        prev_gap_t = curr_gap_t;
+        prev_gap_s = curr_gap_s;
+    }
+
+    prev_m[t.len()]
+        .max(prev_gap_t[t.len()])
+        .max(prev_gap_s[t.len()])
+}
+
+fn affine_best_gap(
+    match_score: i32,
+    gap_in_t: i32,
+    gap_in_s: i32,
+    target_gap_in_t: bool,
+    gap_open: i32,
+    gap_extend: i32,
+) -> i32 {
+    let continue_score = if target_gap_in_t { gap_in_t } else { gap_in_s };
+    affine_add(match_score, gap_open + gap_extend).max(affine_add(continue_score, gap_extend))
+}
+
+fn affine_add(base: i32, delta: i32) -> i32 {
+    if base <= AFFINE_NEG_INF / 2 {
+        AFFINE_NEG_INF
+    } else {
+        base.saturating_add(delta).max(AFFINE_NEG_INF)
+    }
 }
 
 fn print_summary(measurements: &[Measurement]) {

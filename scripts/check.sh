@@ -100,6 +100,9 @@ assert_nonempty "$NW_SCORE" "NW score"
 # For GATTACA vs GCATGCU with (+1,-1,-1), an optimal score is 0
 assert_eq "$NW_SCORE" "0" "NW global alignment score"
 
+say "Run scale probe smoke"
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --format table --verify-limit 128 >/dev/null
+
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Benches (dev mode, faster)"
   export CRITERION_DEV_MODE=1

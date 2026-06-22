@@ -1,9 +1,9 @@
 //! Height-Compressed Dynamic Programming (HCP-DP).
 //!
 //! This crate is an alpha-stage correctness rebuild. The public surface is
-//! intentionally small: a generic summary-tree engine plus two reference
-//! implementations, LCS and linear Needleman-Wunsch, whose returned paths are
-//! tested against independent scoring baselines.
+//! intentionally small: a generic summary-tree engine plus correctness-tested
+//! reference implementations for LCS, linear Needleman-Wunsch, and affine-gap
+//! Needleman-Wunsch.
 
 pub mod blocks;
 pub mod builder;

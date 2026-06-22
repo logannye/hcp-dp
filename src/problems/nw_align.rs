@@ -1,9 +1,4 @@
-//! Needleman–Wunsch global alignment as an HCP-DP instance.
-//!
-//! This is a canonical example with strictly local dependencies and
-//! associativity suitable for height compression. We implement:
-//! - scoring with match/mismatch/gap penalties,
-//! - exact optimal alignment path reconstruction.
+//! Needleman-Wunsch global alignment with linear gap penalties.
 
 use crate::traits::{HcpProblem, SummaryApply};
 
@@ -16,7 +11,7 @@ pub struct NwProblem<'a> {
     pub gap_penalty: i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NwFrontier {
     pub scores: Vec<i32>,
 }
@@ -57,12 +52,40 @@ impl<'a> NwProblem<'a> {
         }
     }
 
-    fn n(&self) -> usize {
+    pub fn n(&self) -> usize {
         self.s.len()
     }
 
-    fn m(&self) -> usize {
+    pub fn m(&self) -> usize {
         self.t.len()
+    }
+
+    pub fn score_path(&self, path: &[NwState]) -> Option<i32> {
+        let mut score = 0;
+        for window in path.windows(2) {
+            let (a, b) = (window[0], window[1]);
+            let di = b.0.checked_sub(a.0)?;
+            let dj = b.1.checked_sub(a.1)?;
+            match (di, dj) {
+                (1, 1) => score += self.score_pair(*self.s.get(a.0)?, *self.t.get(a.1)?),
+                (1, 0) | (0, 1) => score += self.gap_penalty,
+                _ => return None,
+            }
+        }
+        Some(score)
+    }
+
+    pub fn full_table_score(&self) -> i32 {
+        nw_last_row(
+            self.s,
+            self.t,
+            self.match_score,
+            self.mismatch_penalty,
+            self.gap_penalty,
+        )
+        .last()
+        .copied()
+        .unwrap_or(0)
     }
 
     fn score_pair(&self, a: u8, b: u8) -> i32 {
@@ -86,80 +109,58 @@ impl<'a> HcpProblem for NwProblem<'a> {
     }
 
     fn init_frontier(&self) -> Self::Frontier {
-        // Row 0: gaps in s vs prefix of t.
-        let m = self.m();
-        let mut scores = Vec::with_capacity(m + 1);
+        let mut scores = Vec::with_capacity(self.m() + 1);
         scores.push(0);
-        for j in 1..=m {
+        for j in 1..=self.m() {
             scores.push(scores[j - 1] + self.gap_penalty);
         }
         NwFrontier { scores }
     }
 
-    fn forward_step(&self, layer: usize, f: &Self::Frontier) -> Self::Frontier {
-        // Build row i+1 from row i.
-        let i = layer;
-        let m = self.m();
-        let ch_s = self.s[i];
-        let mut next = Vec::with_capacity(m + 1);
-        next.push(f.scores[0] + self.gap_penalty); // gap in t
-
-        for j in 1..=m {
-            let diag = f.scores[j - 1] + self.score_pair(ch_s, self.t[j - 1]);
-            let up = f.scores[j] + self.gap_penalty; // gap in t
-            let left = next[j - 1] + self.gap_penalty; // gap in s
+    fn forward_step(&self, layer: usize, frontier: &Self::Frontier) -> Self::Frontier {
+        let ch = self.s[layer];
+        let mut next = Vec::with_capacity(self.m() + 1);
+        next.push(frontier.scores[0] + self.gap_penalty);
+        for j in 1..=self.m() {
+            let diag = frontier.scores[j - 1] + self.score_pair(ch, self.t[j - 1]);
+            let up = frontier.scores[j] + self.gap_penalty;
+            let left = next[j - 1] + self.gap_penalty;
             next.push(diag.max(up).max(left));
         }
-
         NwFrontier { scores: next }
     }
 
-    fn summarize_block(
-        &self,
-        a: usize,
-        b: usize,
-        frontier_a: &Self::Frontier,
-    ) -> (Self::Frontier, Self::Summary) {
-        let mut f = frontier_a.clone();
-        for i in a..b {
-            f = self.forward_step(i, &f);
+    fn summarize_interval(&self, a: usize, b: usize) -> Self::Summary {
+        assert!(a <= b && b <= self.n(), "invalid NW interval");
+        NwSummary {
+            s: self.s,
+            t: self.t,
+            start: a,
+            end: b,
+            match_score: self.match_score,
+            mismatch_penalty: self.mismatch_penalty,
+            gap_penalty: self.gap_penalty,
         }
-        (
-            f.clone(),
-            NwSummary {
-                s: self.s,
-                t: self.t,
-                start: a,
-                end: b,
-                match_score: self.match_score,
-                mismatch_penalty: self.mismatch_penalty,
-                gap_penalty: self.gap_penalty,
-            },
-        )
     }
 
     fn merge_summary(&self, left: &Self::Summary, right: &Self::Summary) -> Self::Summary {
-        debug_assert!(
-            std::ptr::eq(left.s, right.s),
-            "summaries must use the same source string"
+        assert_eq!(left.end, right.start, "NW summaries must be adjacent");
+        assert!(
+            std::ptr::eq(left.s, right.s) && std::ptr::eq(left.t, right.t),
+            "NW summaries must belong to the same problem"
         );
-        debug_assert!(
-            std::ptr::eq(left.t, right.t),
-            "summaries must use the same target string"
-        );
-        debug_assert_eq!(
+        assert_eq!(
             (left.match_score, left.mismatch_penalty, left.gap_penalty),
-            (right.match_score, right.mismatch_penalty, right.gap_penalty),
-            "summaries must agree on scoring"
+            (right.match_score, right.mismatch_penalty, right.gap_penalty)
         );
         NwSummary {
-            s: left.s,
-            t: left.t,
+            s: self.s,
+            t: self.t,
             start: left.start,
             end: right.end,
-            match_score: left.match_score,
-            mismatch_penalty: left.mismatch_penalty,
-            gap_penalty: left.gap_penalty,
+            match_score: self.match_score,
+            mismatch_penalty: self.mismatch_penalty,
+            gap_penalty: self.gap_penalty,
         }
     }
 
@@ -167,34 +168,31 @@ impl<'a> HcpProblem for NwProblem<'a> {
         NwBoundary { row: 0, col: 0 }
     }
 
-    fn terminal_boundary(&self, frontier_t: &Self::Frontier) -> Self::Boundary {
-        // We align entire strings: end at (n,m).
-        let _ = frontier_t; // frontier carries scores; we know coordinates.
+    fn terminal_boundary(&self, _frontier_t: &Self::Frontier) -> Self::Boundary {
         NwBoundary {
             row: self.n(),
             col: self.m(),
         }
     }
 
-    fn choose_boundary(
+    fn choose_split(
         &self,
         a: usize,
         m: usize,
         c: usize,
-        _sigma_left: &Self::Summary,
-        _sigma_right: &Self::Summary,
         beta_a: &Self::Boundary,
         beta_c: &Self::Boundary,
+        _sigma_left: &Self::Summary,
+        _sigma_right: &Self::Summary,
     ) -> Self::Boundary {
-        // Hirschberg-style mid column for Needleman–Wunsch on subproblem:
-        // s[a..c], t[p..q].
+        assert_eq!(beta_a.row, a, "left boundary row must match interval start");
+        assert_eq!(beta_c.row, c, "right boundary row must match interval end");
+        assert!(a <= m && m <= c, "split must lie inside interval");
+
         let p = beta_a.col;
         let q = beta_c.col;
+        assert!(p <= q && q <= self.m(), "invalid NW boundary columns");
 
-        debug_assert!(a <= m && m <= c);
-        debug_assert!(p <= q && q <= self.m());
-
-        // Forward scores for s[a..m] vs t[p..q].
         let fwd = nw_last_row(
             &self.s[a..m],
             &self.t[p..q],
@@ -202,8 +200,6 @@ impl<'a> HcpProblem for NwProblem<'a> {
             self.mismatch_penalty,
             self.gap_penalty,
         );
-
-        // Backward scores for reverse(s[m..c]) vs reverse(t[p..q]).
         let s_rev: Vec<u8> = self.s[m..c].iter().rev().copied().collect();
         let t_rev: Vec<u8> = self.t[p..q].iter().rev().copied().collect();
         let bwd = nw_last_row(
@@ -214,53 +210,14 @@ impl<'a> HcpProblem for NwProblem<'a> {
             self.gap_penalty,
         );
 
-        let len_t = q - p;
-        let mut best_j = 0usize;
-        let mut best_val = i32::MIN;
-
-        for j in 0..=len_t {
-            let v = fwd[j] + bwd[len_t - j];
-            if v > best_val {
-                best_val = v;
-                best_j = j;
-            }
-        }
-
-        NwBoundary {
-            row: m,
-            col: p + best_j,
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn choose_boundary_with_frontiers(
-        &self,
-        _a: usize,
-        m: usize,
-        _c: usize,
-        _frontier_a: &Self::Frontier,
-        frontier_m_forward: &Self::Frontier,
-        frontier_m_backward: &Self::Frontier,
-        _frontier_c: &Self::Frontier,
-        _sigma_left: &Self::Summary,
-        _sigma_right: &Self::Summary,
-        beta_a: &Self::Boundary,
-        beta_c: &Self::Boundary,
-    ) -> Self::Boundary {
-        let p = beta_a.col;
-        let q = beta_c.col;
-
-        let forward = &frontier_m_forward.scores;
-        let backward = &frontier_m_backward.scores;
-
-        let mut best_val = i32::MIN;
+        let width = q - p;
         let mut best_col = p;
-
-        for j in p..=q {
-            let cand = forward[j] + backward[j];
-            if cand > best_val {
-                best_val = cand;
-                best_col = j;
+        let mut best_score = i32::MIN;
+        for j in 0..=width {
+            let score = fwd[j] + bwd[width - j];
+            if score > best_score {
+                best_score = score;
+                best_col = p + j;
             }
         }
 
@@ -270,32 +227,31 @@ impl<'a> HcpProblem for NwProblem<'a> {
         }
     }
 
-    fn reconstruct_block(
+    fn reconstruct_leaf(
         &self,
         a: usize,
         b: usize,
         beta_a: &Self::Boundary,
         beta_b: &Self::Boundary,
     ) -> Vec<Self::State> {
-        // Local Needleman–Wunsch between (a,p) and (b,q).
+        assert_eq!(beta_a.row, a, "leaf start row must match beta_a");
+        assert_eq!(beta_b.row, b, "leaf end row must match beta_b");
         let p = beta_a.col;
         let q = beta_b.col;
+        assert!(p <= q && q <= self.m(), "invalid NW leaf columns");
+
         let s_sub = &self.s[a..b];
         let t_sub = &self.t[p..q];
         let n = s_sub.len();
         let m = t_sub.len();
 
-        let mut dp = vec![vec![0i32; m + 1]; n + 1];
-
-        // Initialize with linear gaps
+        let mut dp = vec![vec![0; m + 1]; n + 1];
         for i in 1..=n {
             dp[i][0] = dp[i - 1][0] + self.gap_penalty;
         }
         for j in 1..=m {
             dp[0][j] = dp[0][j - 1] + self.gap_penalty;
         }
-
-        // Fill
         for i in 1..=n {
             for j in 1..=m {
                 let diag = dp[i - 1][j - 1] + self.score_pair(s_sub[i - 1], t_sub[j - 1]);
@@ -305,7 +261,6 @@ impl<'a> HcpProblem for NwProblem<'a> {
             }
         }
 
-        // Backtrack
         let mut i = n;
         let mut j = m;
         let mut rev_path = Vec::with_capacity(n + m + 1);
@@ -320,15 +275,8 @@ impl<'a> HcpProblem for NwProblem<'a> {
                 j -= 1;
             } else if i > 0 && dp[i][j] == dp[i - 1][j] + self.gap_penalty {
                 i -= 1;
-            } else if j > 0 && dp[i][j] == dp[i][j - 1] + self.gap_penalty {
-                j -= 1;
             } else {
-                // Fallback to ensure termination
-                if i > 0 {
-                    i -= 1;
-                } else {
-                    j -= 1;
-                }
+                j -= 1;
             }
             rev_path.push((a + i, p + j));
         }
@@ -338,60 +286,39 @@ impl<'a> HcpProblem for NwProblem<'a> {
     }
 
     fn extract_cost(&self, frontier_t: &Self::Frontier, _beta_t: &Self::Boundary) -> Self::Cost {
-        *frontier_t.scores.last().unwrap_or(&0)
+        frontier_t.scores.last().copied().unwrap_or(0)
     }
 }
 
 impl<'a> SummaryApply<NwFrontier> for NwSummary<'a> {
     fn apply(&self, frontier: &NwFrontier) -> NwFrontier {
-        let mut prev = frontier.scores.clone();
-        let mut curr = vec![0i32; prev.len()];
-
-        for &ch_s in &self.s[self.start..self.end] {
-            curr[0] = prev[0] + self.gap_penalty;
+        assert_eq!(
+            frontier.scores.len(),
+            self.t.len() + 1,
+            "NW frontier width mismatch"
+        );
+        let mut current = frontier.clone();
+        for layer in self.start..self.end {
+            let ch = self.s[layer];
+            let mut next = Vec::with_capacity(self.t.len() + 1);
+            next.push(current.scores[0] + self.gap_penalty);
             for j in 1..=self.t.len() {
-                let score = if ch_s == self.t[j - 1] {
+                let pair_score = if ch == self.t[j - 1] {
                     self.match_score
                 } else {
                     -self.mismatch_penalty
                 };
-                let diag = prev[j - 1] + score;
-                let up = prev[j] + self.gap_penalty;
-                let left = curr[j - 1] + self.gap_penalty;
-                curr[j] = diag.max(up).max(left);
+                let diag = current.scores[j - 1] + pair_score;
+                let up = current.scores[j] + self.gap_penalty;
+                let left = next[j - 1] + self.gap_penalty;
+                next.push(diag.max(up).max(left));
             }
-            std::mem::swap(&mut prev, &mut curr);
+            current = NwFrontier { scores: next };
         }
-
-        NwFrontier { scores: prev }
-    }
-
-    fn apply_reverse(&self, frontier: &NwFrontier) -> NwFrontier {
-        let mut prev = frontier.scores.clone();
-        let mut curr = vec![0i32; prev.len()];
-
-        for &ch_s in self.s[self.start..self.end].iter().rev() {
-            let last = curr.len() - 1;
-            curr[last] = prev[last] + self.gap_penalty;
-            for j in (0..self.t.len()).rev() {
-                let score = if ch_s == self.t[j] {
-                    self.match_score
-                } else {
-                    -self.mismatch_penalty
-                };
-                let down = prev[j];
-                let right = curr[j + 1] + self.gap_penalty;
-                let diag = prev[j + 1] + score;
-                curr[j] = down.max(right).max(diag);
-            }
-            std::mem::swap(&mut prev, &mut curr);
-        }
-
-        NwFrontier { scores: prev }
+        current
     }
 }
 
-/// Compute last row of Needleman–Wunsch DP for x vs y.
 fn nw_last_row(
     x: &[u8],
     y: &[u8],
@@ -399,19 +326,16 @@ fn nw_last_row(
     mismatch_penalty: i32,
     gap_penalty: i32,
 ) -> Vec<i32> {
-    let m = y.len();
-    let mut prev = Vec::with_capacity(m + 1);
-    let mut curr = vec![0i32; m + 1];
-
-    // row 0
+    let mut prev = Vec::with_capacity(y.len() + 1);
+    let mut curr = vec![0; y.len() + 1];
     prev.push(0);
-    for j in 1..=m {
+    for j in 1..=y.len() {
         prev.push(prev[j - 1] + gap_penalty);
     }
 
     for &cx in x {
         curr[0] = prev[0] + gap_penalty;
-        for j in 1..=m {
+        for j in 1..=y.len() {
             let score = if cx == y[j - 1] {
                 match_score
             } else {
@@ -433,60 +357,21 @@ mod tests {
     use super::*;
     use crate::HcpEngine;
 
-    fn valid_path(path: &[(usize, usize)], n: usize, m: usize) -> bool {
-        if path.is_empty() {
-            // For degenerate cases with zero layers, an empty path is acceptable.
-            return n == 0 || m == 0;
-        }
-        if *path.first().unwrap() != (0, 0) {
-            return false;
-        }
-        if *path.last().unwrap() != (n, m) {
-            return false;
-        }
-        for w in path.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let di = b.0 as isize - a.0 as isize;
-            let dj = b.1 as isize - a.1 as isize;
-            match (di, dj) {
-                (1, 0) | (0, 1) | (1, 1) => {}
-                _ => return false,
-            }
-        }
-        true
+    #[test]
+    fn audit_regression_path_realizes_score() {
+        let problem = NwProblem::new(b"CBA", b"ACC", 2, 1, -2);
+        let (score, path) = HcpEngine::new(problem.clone()).run();
+        assert_eq!(score, -3);
+        assert_eq!(problem.score_path(&path), Some(score));
     }
 
     #[test]
-    fn last_row_small_cases() {
-        assert_eq!(nw_last_row(b"", b"", 1, 1, -1), vec![0]);
-        assert_eq!(nw_last_row(b"A", b"", 1, 1, -1).len(), 1);
-        assert_eq!(nw_last_row(b"", b"A", 1, 1, -1).len(), 2);
-    }
-
-    #[test]
-    fn e2e_example_scores_and_path() {
-        let s = b"GATTACA";
-        let t = b"GCATGCU";
-        let problem = NwProblem::new(s, t, 1, 1, -1);
-        let engine = HcpEngine::new(problem);
-        let (score, path) = engine.run();
-        assert_eq!(score, 0);
-        assert!(valid_path(&path, s.len(), t.len()));
-    }
-
-    #[test]
-    fn edge_cases_empty_and_identical() {
-        let s = b"";
-        let t = b"ABC";
-        let problem = NwProblem::new(s, t, 1, 1, -1);
-        let engine = HcpEngine::new(problem);
-        let (_score, path) = engine.run();
-        assert!(valid_path(&path, 0, 3));
-
-        let s = b"HELLO";
-        let problem = NwProblem::new(s, s, 1, 1, -1);
-        let engine = HcpEngine::new(problem);
-        let (_score, path) = engine.run();
-        assert!(valid_path(&path, s.len(), s.len()));
+    fn empty_source_reconstructs_gap_path() {
+        let problem = NwProblem::new(b"", b"ABC", 1, 1, -2);
+        let (score, path) = HcpEngine::new(problem.clone()).run();
+        assert_eq!(score, -6);
+        assert_eq!(path.first(), Some(&(0, 0)));
+        assert_eq!(path.last(), Some(&(0, 3)));
+        assert_eq!(problem.score_path(&path), Some(score));
     }
 }

@@ -2,10 +2,11 @@
 name = "hcp-dp"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 license = "MIT"
-authors = ["Your Name <you@example.com>"]
-description = "Height-compressed dynamic programming engine and reference implementations."
-repository = "https://github.com/your-org/hcp-dp"
+authors = ["Logan Nye"]
+description = "Alpha-stage height-compressed dynamic programming engine with correctness-tested LCS and Needleman-Wunsch examples."
+repository = "https://github.com/logannye/hcp-dp"
 readme = "README.md"
 keywords = ["dynamic-programming", "algorithms", "bioinformatics", "compression"]
 categories = ["algorithms", "science", "data-structures"]
@@ -28,6 +29,5 @@ name = "large_align"
 harness = false
 
 [features]
-heavy = []
 parallel = ["rayon"]
 tracing = ["dep:tracing"]

@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@v1.70.0
+      - uses: dtolnay/rust-toolchain@1.88.0
       - name: Cargo check (MSRV)
         run: cargo check --workspace --all-targets
 
@@ -48,30 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - name: Install grcov
-        run: cargo install grcov
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run tests with coverage
-        env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-Zinstrument-coverage"
-          LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
-        run: cargo test --workspace
-      - name: Generate coverage report
-        run: |
-          grcov target/coverage \
-            --binary-path target/debug \
-            -s . \
-            -t lcov \
-            --branch \
-            --ignore-not-existing \
-            --ignore "/*" \
-            -o target/coverage/lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path target/coverage/lcov.info
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: target/coverage/lcov.info
-
 

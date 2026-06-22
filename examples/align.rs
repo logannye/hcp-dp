@@ -1,4 +1,4 @@
-//! Example: Needleman–Wunsch global alignment via HCP-DP.
+//! Example: Needleman-Wunsch global alignment via HCP-DP.
 //!
 //! Run with:
 //! `cargo run --example align`

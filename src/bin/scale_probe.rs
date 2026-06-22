@@ -2,7 +2,10 @@ use std::env;
 use std::time::Instant;
 
 use hcp_dp::{
-    problems::{lcs::LcsProblem, nw_affine::NwAffineProblem, nw_align::NwProblem},
+    problems::{
+        lcs::LcsProblem, nw_affine::NwAffineProblem, nw_align::NwProblem,
+        smith_waterman::SmithWatermanProblem,
+    },
     HcpEngine,
 };
 use sysinfo::{get_current_pid, ProcessRefreshKind, System};
@@ -27,6 +30,7 @@ fn main() {
     let mut measurements = Vec::new();
     measurements.extend(run_lcs(&options, &mut sys));
     measurements.extend(run_nw(&options, &mut sys));
+    measurements.extend(run_smith_waterman(&options, &mut sys));
     measurements.extend(run_affine_nw(&options, &mut sys));
 
     if measurements
@@ -247,6 +251,51 @@ fn run_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
         .collect()
 }
 
+fn run_smith_waterman(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    const SIZES: &[usize] = &[64, 128, 256, 512, 1024];
+    const MATCH_SCORE: i32 = 2;
+    const MISMATCH_PENALTY: i32 = 1;
+    const GAP_PENALTY: i32 = -2;
+    SIZES
+        .iter()
+        .map(|&len| {
+            measure("smith_waterman", len, sys, || {
+                let s = deterministic_dna(len);
+                let t = deterministic_dna_offset(len, 1);
+                let problem =
+                    SmithWatermanProblem::new(&s, &t, MATCH_SCORE, MISMATCH_PENALTY, GAP_PENALTY);
+                let (cost, path) = HcpEngine::new(problem.clone()).run();
+                if len <= options.verify_limit {
+                    let baseline =
+                        full_sw_score(&s, &t, MATCH_SCORE, MISMATCH_PENALTY, GAP_PENALTY);
+                    let path_score = problem.score_path(&path);
+                    if baseline == cost && path_score == Some(cost) {
+                        (VerificationStatus::Passed, format!("cost={cost}"))
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("baseline={baseline}, cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                } else {
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(cost) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("cost={cost}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                }
+            })
+        })
+        .collect()
+}
+
 fn run_affine_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const SIZES: &[usize] = &[32, 64, 128, 256, 512];
     const MATCH_SCORE: i32 = 2;
@@ -379,6 +428,29 @@ fn full_nw_score(s: &[u8], t: &[u8], match_score: i32, mismatch_penalty: i32, ga
         std::mem::swap(&mut prev, &mut curr);
     }
     prev[t.len()]
+}
+
+fn full_sw_score(s: &[u8], t: &[u8], match_score: i32, mismatch_penalty: i32, gap: i32) -> i32 {
+    let mut prev = vec![0; t.len() + 1];
+    let mut curr = vec![0; t.len() + 1];
+    let mut best = 0;
+    for &a in s {
+        curr[0] = 0;
+        for j in 1..=t.len() {
+            let pair = if a == t[j - 1] {
+                match_score
+            } else {
+                -mismatch_penalty
+            };
+            let diag = prev[j - 1] + pair;
+            let up = prev[j] + gap;
+            let left = curr[j - 1] + gap;
+            curr[j] = 0.max(diag).max(up).max(left);
+            best = best.max(curr[j]);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    best
 }
 
 fn full_affine_nw_score(

@@ -3,6 +3,7 @@ use hcp_dp::{
         lcs::{LcsProblem, LcsState},
         nw_affine::{NwAffineFrontier, NwAffineProblem, NwAffineState},
         nw_align::{NwProblem, NwState},
+        smith_waterman::{SmithWatermanProblem, SwCell, SwFrontier},
     },
     HcpEngine, HcpProblem, SummaryApply,
 };
@@ -25,6 +26,14 @@ fn nw_frontier_after(problem: &NwProblem<'_>, a: usize) -> Vec<i32> {
 }
 
 fn affine_frontier_after(problem: &NwAffineProblem<'_>, a: usize) -> NwAffineFrontier {
+    let mut frontier = problem.init_frontier();
+    for layer in 0..a {
+        frontier = problem.forward_step(layer, &frontier);
+    }
+    frontier
+}
+
+fn sw_frontier_after(problem: &SmithWatermanProblem<'_>, a: usize) -> SwFrontier {
     let mut frontier = problem.init_frontier();
     for layer in 0..a {
         frontier = problem.forward_step(layer, &frontier);
@@ -56,6 +65,20 @@ fn assert_affine_path(problem: &NwAffineProblem<'_>, cost: i32, path: &[NwAffine
         path.last().map(|state| (state.row, state.col)),
         Some((problem.n(), problem.m()))
     );
+    assert_eq!(problem.score_path(path), Some(cost));
+}
+
+fn assert_sw_path(problem: &SmithWatermanProblem<'_>, cost: i32, path: &[SwCell]) {
+    assert_eq!(cost, problem.full_table_score());
+    if cost == 0 {
+        assert!(path.is_empty());
+    } else {
+        let (start, end) = problem
+            .full_table_endpoints()
+            .expect("positive SW score must have endpoints");
+        assert_eq!(path.first(), Some(&start));
+        assert_eq!(path.last(), Some(&end));
+    }
     assert_eq!(problem.score_path(path), Some(cost));
 }
 
@@ -143,6 +166,32 @@ fn assert_affine_summary_contract(problem: &NwAffineProblem<'_>) {
     }
 }
 
+fn assert_sw_summary_contract(problem: &SmithWatermanProblem<'_>) {
+    let n = problem.n();
+    for a in 0..=n {
+        let frontier_a = sw_frontier_after(problem, a);
+
+        for b in a..=n {
+            let sigma_ab = problem.summarize_interval(a, b);
+            let mut direct = frontier_a.clone();
+            for layer in a..b {
+                direct = problem.forward_step(layer, &direct);
+            }
+            assert_eq!(sigma_ab.apply(&frontier_a), direct);
+
+            for c in b..=n {
+                let sigma_bc = problem.summarize_interval(b, c);
+                let merged = problem.merge_summary(&sigma_ab, &sigma_bc);
+                let mut direct_ac = frontier_a.clone();
+                for layer in a..c {
+                    direct_ac = problem.forward_step(layer, &direct_ac);
+                }
+                assert_eq!(merged.apply(&frontier_a), direct_ac);
+            }
+        }
+    }
+}
+
 fn assert_lcs_split_contract(problem: &LcsProblem<'_>) {
     let n = problem.n();
     if n < 2 {
@@ -204,6 +253,31 @@ fn assert_affine_split_contract(problem: &NwAffineProblem<'_>) {
     assert_affine_path(problem, problem.full_table_score(), &left);
 }
 
+fn assert_sw_split_contract(problem: &SmithWatermanProblem<'_>) {
+    let n = problem.n();
+    if n < 2 {
+        return;
+    }
+    let mid = n / 2;
+    let beta_a = problem.initial_boundary();
+    let frontier_t = sw_frontier_after(problem, n);
+    let beta_c = problem.terminal_boundary(&frontier_t);
+    let sigma_left = problem.summarize_interval(0, mid);
+    let sigma_right = problem.summarize_interval(mid, n);
+    let beta_m = problem.choose_split(0, mid, n, &beta_a, &beta_c, &sigma_left, &sigma_right);
+    let left = problem.reconstruct_leaf(0, mid, &beta_a, &beta_m);
+    let right = problem.reconstruct_leaf(mid, n, &beta_m, &beta_c);
+
+    let mut joined = left;
+    if joined.is_empty() {
+        joined = right;
+    } else if !right.is_empty() {
+        assert_eq!(joined.last(), right.first());
+        joined.extend_from_slice(&right[1..]);
+    }
+    assert_sw_path(problem, problem.full_table_score(), &joined);
+}
+
 proptest! {
     #[test]
     fn lcs_contracts_hold(a in "[ACGT]{0,8}", b in "[ACGT]{0,8}") {
@@ -237,6 +311,17 @@ proptest! {
             assert_affine_path(&problem, cost, &path);
         }
     }
+
+    #[test]
+    fn smith_waterman_contracts_hold(a in "[ACGT]{0,6}", b in "[ACGT]{0,6}") {
+        let problem = SmithWatermanProblem::new(a.as_bytes(), b.as_bytes(), 2, 1, -2);
+        assert_sw_summary_contract(&problem);
+        assert_sw_split_contract(&problem);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_sw_path(&problem, cost, &path);
+        }
+    }
 }
 
 #[test]
@@ -253,6 +338,11 @@ fn audit_regressions_are_fixed() {
     let (affine_cost, affine_path) = HcpEngine::new(affine.clone()).run();
     assert_eq!(affine_cost, -3);
     assert_affine_path(&affine, affine_cost, &affine_path);
+
+    let sw = SmithWatermanProblem::new(b"ACACACTA", b"AGCACACA", 2, 1, -2);
+    let (sw_cost, sw_path) = HcpEngine::new(sw.clone()).run();
+    assert_eq!(sw_cost, 10);
+    assert_sw_path(&sw, sw_cost, &sw_path);
 }
 
 #[test]
@@ -272,6 +362,29 @@ fn affine_edge_cases_hold() {
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
             assert_affine_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
+fn smith_waterman_edge_cases_hold() {
+    type SwCase<'a> = (&'a [u8], &'a [u8], i32, i32, i32);
+    let cases: &[SwCase<'_>] = &[
+        (b"", b"ABC", 2, 1, -2),
+        (b"ABC", b"", 2, 1, -2),
+        (b"AAAA", b"TTTT", 1, 3, -2),
+        (b"GGAC", b"TTGGA", 2, 1, -2),
+        (b"ACGTAC", b"TAC", 2, 1, -2),
+        (b"AAAAAA", b"AAA", 2, 1, -2),
+        (b"ACGT", b"ACGT", 2, 1, -2),
+    ];
+
+    for (s, t, match_score, mismatch_penalty, gap_penalty) in cases {
+        let problem =
+            SmithWatermanProblem::new(s, t, *match_score, *mismatch_penalty, *gap_penalty);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_sw_path(&problem, cost, &path);
         }
     }
 }

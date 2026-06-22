@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use hcp_dp::{
-    problems::{nw_affine::NwAffineProblem, nw_align::NwProblem},
+    problems::{
+        nw_affine::NwAffineProblem, nw_align::NwProblem, smith_waterman::SmithWatermanProblem,
+    },
     HcpEngine,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -83,5 +85,40 @@ fn bench_affine_nw_perf(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_nw_perf, bench_affine_nw_perf);
+fn bench_smith_waterman_perf(c: &mut Criterion) {
+    let mut group = c.benchmark_group("smith_waterman_perf_height_compressed");
+    for &len in &[500usize, 1_000] {
+        group.bench_function(format!("smith_waterman_len_{len}"), |b| {
+            b.iter_batched(
+                || {
+                    let mut rng = StdRng::seed_from_u64(45);
+                    let s = random_dna(&mut rng, len);
+                    let t = random_dna(&mut rng, len);
+                    (s, t)
+                },
+                |(s, t)| {
+                    let before = rss_kib();
+                    let problem = SmithWatermanProblem::new(&s, &t, 2, 1, -2);
+                    let engine = HcpEngine::new(problem);
+                    let (score, _path) = engine.run();
+                    let after = rss_kib();
+                    criterion::black_box(score);
+                    eprintln!(
+                        "RSS KiB delta (smith-waterman {len}): {}",
+                        after.saturating_sub(before)
+                    );
+                },
+                BatchSize::PerIteration,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_nw_perf,
+    bench_smith_waterman_perf,
+    bench_affine_nw_perf
+);
 criterion_main!(benches);

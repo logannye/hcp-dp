@@ -100,6 +100,12 @@ assert_nonempty "$NW_SCORE" "NW score"
 # For GATTACA vs GCATGCU with (+1,-1,-1), an optimal score is 0
 assert_eq "$NW_SCORE" "0" "NW global alignment score"
 
+say "Run example: smith_waterman"
+SW_OUT=$(cargo_with_features run --quiet --example smith_waterman ${RELEASE_FLAG:-})
+SW_SCORE=$(printf '%s' "$SW_OUT" | grep -E "^Local alignment score:" | parse_num)
+assert_nonempty "$SW_SCORE" "Smith-Waterman score"
+assert_eq "$SW_SCORE" "10" "Smith-Waterman local alignment score"
+
 say "Run scale probe smoke"
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --format table --verify-limit 128 >/dev/null
 

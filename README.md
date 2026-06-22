@@ -22,6 +22,7 @@ The crate currently exports:
 - `problems::lcs::LcsProblem`
 - `problems::nw_align::NwProblem`
 - `problems::nw_affine::NwAffineProblem`
+- `problems::smith_waterman::SmithWatermanProblem`
 
 Former examples for banded LCS, Viterbi, DAG shortest path, and matrix-chain
 multiplication were removed from the public surface. They should be reintroduced
@@ -34,6 +35,7 @@ only after passing the same contract harness.
 | LCS | yes | yes | yes | no | smoke only |
 | Needleman-Wunsch, linear gap | yes | yes | yes | no | smoke only |
 | Needleman-Wunsch, affine gap | yes | yes | yes | no | smoke only |
+| Smith-Waterman, linear gap | yes | yes | yes | no | smoke only |
 
 Performance baselines are not enforced yet. Correctness comes first.
 
@@ -109,6 +111,8 @@ assert_eq!(problem.score_path(&path), Some(cost));
 
 Affine-gap alignment uses Gotoh state semantics. The first position in a gap
 costs `gap_open + gap_extend`; each continued gap position costs `gap_extend`.
+Smith-Waterman returns the selected local alignment path only. If no positive
+local alignment exists, it returns cost `0` with an empty path.
 
 ## Development Checks
 

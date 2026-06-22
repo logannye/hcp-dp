@@ -50,6 +50,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Prepare coverage output directory
+        run: mkdir -p target/coverage
       - name: Run tests with coverage
         run: cargo llvm-cov --workspace --lcov --output-path target/coverage/lcov.info
       - name: Upload coverage artifact
@@ -57,4 +59,3 @@ jobs:
         with:
           name: coverage
           path: target/coverage/lcov.info
-

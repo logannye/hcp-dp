@@ -69,6 +69,16 @@ fn normalize_tsv_timings(text: &str) -> String {
 }
 
 #[test]
+fn version_flag_reports_package_version() {
+    let output = run(&["--version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        format!("hcp-align {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn raw_json_full_verification_still_works() {
     let output = run(&[
         "global-linear",

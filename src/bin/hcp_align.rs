@@ -91,6 +91,7 @@ fn run() -> Result<bool, String> {
 
 #[derive(Parser)]
 #[command(name = "hcp-align")]
+#[command(version)]
 #[command(about = "Exact HCP-DP sequence alignment CLI")]
 struct Cli {
     #[command(subcommand)]

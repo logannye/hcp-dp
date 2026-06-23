@@ -16,6 +16,10 @@ During development, the same commands can be run through Cargo:
 cargo run --bin hcp-align -- global-linear --query ACGT --target ACGT
 ```
 
+GitHub alpha builds are produced by the manual `Release Alpha` workflow. Each
+artifact includes the `hcp-align` binary, README, license, and a SHA-256
+checksum.
+
 ## Commands
 
 | Command | Meaning |
@@ -60,6 +64,8 @@ One-vs-many and all-vs-all modes are deferred.
 
 Per-pair structured output includes:
 
+- `schema_version`
+- `engine`
 - `pair_index`
 - `query_id`, `target_id`
 - `mode`
@@ -69,13 +75,61 @@ Per-pair structured output includes:
 - `verified`
 - `query_start`, `query_end`, `target_start`, `target_end`
 - `cigar`
-- `operations`
+- `operation_counts` by default
+- `operations` only with `--operation-detail full`
 - `block_size`
+- `path_length`
+- `summary_build_ms`, `reconstruction_ms`, `verification_ms`
 - `elapsed_ms`
 - `aligned_query`, `aligned_target` when `--show-alignment` is set
+- `error` for failed per-pair records when `--continue-on-error` is used
 
 `verified` remains for simple compatibility with earlier JSON output. New
 consumers should use `verification_status`.
+
+Trace detail is controlled with:
+
+```bash
+--operation-detail none|summary|full
+```
+
+The default is `summary`, which emits compact operation counts instead of a
+full per-step operation array. Use `full` when downstream tooling needs every
+match, mismatch, insertion, and deletion step.
+
+Write output to a file with:
+
+```bash
+--output <PATH>
+```
+
+Progress is controlled with:
+
+```bash
+--progress auto|always|never
+```
+
+Progress is always written to stderr. The default `auto` only prints progress
+for multi-record runs when stderr is attached to a terminal.
+
+Batch execution can continue after per-pair failures:
+
+```bash
+--continue-on-error
+```
+
+Without this flag, per-pair errors fail fast. With it, failed pairs are emitted
+as records with `verification_status = "failed"` and an `error` field; the
+process still exits nonzero if any record failed.
+
+Threaded batch execution:
+
+```bash
+--threads <N>
+```
+
+Values above `1` require building with the crate's `parallel` feature. Without
+that feature, only `--threads 1` is accepted.
 
 ## Verification
 
@@ -142,7 +196,13 @@ hcp-align global-affine \
 ```bash
 hcp-align edit-distance \
   --query-file reads.fa --target-file references.fa \
-  --verify --format jsonl
+  --verify --format jsonl --output results.jsonl
+```
+
+```bash
+hcp-align edit-distance \
+  --query-file reads.fa --target-file references.fa \
+  --format jsonl --operation-detail none --progress always
 ```
 
 ```bash
@@ -158,5 +218,6 @@ hcp-align semiglobal-linear \
 - Wrapped FASTQ is not supported.
 - No SAM/BAM/PAF export yet.
 - Protein substitution matrices are not implemented; scoring is match/mismatch.
+- Multi-threaded batch mode requires the optional `parallel` feature.
 - Performance is still reported conservatively until release artifacts include
   larger reproducible benchmarks.

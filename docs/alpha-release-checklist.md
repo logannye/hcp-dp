@@ -1,6 +1,6 @@
 # 0.1 Alpha Release Checklist
 
-This alpha is a source-install and GitHub-artifact release. Do not publish to
+This alpha is a source-install and GitHub-binary release. Do not publish to
 crates.io and do not rename the repository in this round.
 
 ## Required Local Gates
@@ -17,6 +17,7 @@ cargo +1.88.0 check --workspace --all-targets
 cargo bench --no-run
 python3 scripts/validate_external.py
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
+cargo run --bin scale_probe -- --mode edit-distance-deep --engine hcp --max-size 128 --format json
 ```
 
 ## Required GitHub Gates
@@ -26,7 +27,8 @@ python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
 - MSRV green,
 - macOS, Windows, and Linux green,
 - feature checks green,
-- manual release validation workflow available.
+- manual release validation workflow available,
+- manual release alpha workflow available.
 
 ## Manual Release Validation
 
@@ -38,6 +40,12 @@ uploads:
 target/hcp-dp-report/
 ```
 
+## Manual Alpha Binary Release
+
+Run the `Release Alpha` workflow from GitHub Actions. It builds release-mode
+`hcp-align` binaries for Linux, macOS, and Windows, uploads SHA-256 checksums,
+and uploads the same correctness/performance report artifact.
+
 ## Alpha Readiness Criteria
 
 - `hcp-align` supports single-record inline inputs and multi-record FASTA/FASTQ
@@ -46,6 +54,11 @@ target/hcp-dp-report/
 - `json`, `jsonl`, `tsv`, and `cigar` outputs are tested.
 - Independent path scoring is always computed.
 - `--verify` reports `full`, `path_only`, or `failed` clearly.
+- JSON/JSONL includes `schema_version` and `engine`.
+- JSON/JSONL defaults to compact operation counts; full operations are opt-in.
+- `--output`, `--progress`, `--continue-on-error`, and `--threads` are tested.
+- Edit-distance deep reports compare HCP, full-table, linear-space, and optional
+  Edlib engines.
 - Windows CI sets `SCALE_PROBE_MAX_SIZE=512` to keep smoke runtime comfortably
   below the job budget while local probes keep the larger default sizes.
 - Smith-Waterman and semi-global traceback avoid repeated full selected-path

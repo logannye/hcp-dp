@@ -1,5 +1,6 @@
 use std::{
     env,
+    process::Command,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -13,7 +14,7 @@ use hcp_dp::{
         edit_distance::EditDistanceProblem, lcs::LcsProblem, nw_affine::NwAffineProblem,
         nw_align::NwProblem, semiglobal::SemiGlobalProblem, smith_waterman::SmithWatermanProblem,
     },
-    HcpEngine,
+    HcpEngine, HcpRunStats,
 };
 use serde::Serialize;
 use sysinfo::{get_current_pid, ProcessRefreshKind, System};
@@ -33,29 +34,37 @@ fn main() {
     eprintln!("HCP-DP scale probe");
     eprintln!("Verified means: baseline objective matches and returned path realizes it.");
     eprintln!("Verification limit: {}", options.verify_limit);
+    eprintln!("Mode: {}", options.mode.label());
     if let Some(scenario) = &options.scenario {
         eprintln!("Scenario filter: {scenario}");
     }
 
     let mut sys = System::new();
     let mut measurements = Vec::new();
-    if options.should_run("lcs") {
-        measurements.extend(run_lcs(&options, &mut sys));
-    }
-    if options.should_run("needleman_wunsch") {
-        measurements.extend(run_nw(&options, &mut sys));
-    }
-    if options.should_run("smith_waterman") {
-        measurements.extend(run_smith_waterman(&options, &mut sys));
-    }
-    if options.should_run("needleman_wunsch_affine") {
-        measurements.extend(run_affine_nw(&options, &mut sys));
-    }
-    if options.should_run("edit_distance") {
-        measurements.extend(run_edit_distance(&options, &mut sys));
-    }
-    if options.should_run("semiglobal") {
-        measurements.extend(run_semiglobal(&options, &mut sys));
+    match options.mode {
+        ProbeMode::Standard => {
+            if options.should_run("lcs") {
+                measurements.extend(run_lcs(&options, &mut sys));
+            }
+            if options.should_run("needleman_wunsch") {
+                measurements.extend(run_nw(&options, &mut sys));
+            }
+            if options.should_run("smith_waterman") {
+                measurements.extend(run_smith_waterman(&options, &mut sys));
+            }
+            if options.should_run("needleman_wunsch_affine") {
+                measurements.extend(run_affine_nw(&options, &mut sys));
+            }
+            if options.should_run("edit_distance") {
+                measurements.extend(run_edit_distance(&options, &mut sys));
+            }
+            if options.should_run("semiglobal") {
+                measurements.extend(run_semiglobal(&options, &mut sys));
+            }
+        }
+        ProbeMode::EditDistanceDeep => {
+            measurements.extend(run_edit_distance_deep(&options, &mut sys));
+        }
     }
 
     if measurements.is_empty() {
@@ -84,6 +93,8 @@ struct Options {
     verify_limit: usize,
     scenario: Option<String>,
     max_size: Option<usize>,
+    mode: ProbeMode,
+    engine: Option<DeepEngine>,
 }
 
 impl Options {
@@ -96,6 +107,8 @@ impl Options {
         let mut verify_limit = 512;
         let mut scenario = None;
         let mut max_size = None;
+        let mut mode = ProbeMode::Standard;
+        let mut engine = None;
 
         while let Some(arg) = args.next() {
             let arg = arg.into();
@@ -134,6 +147,22 @@ impl Options {
                 max_size = Some(parse_limit(&value)?);
             } else if let Some(value) = arg.strip_prefix("--max-size=") {
                 max_size = Some(parse_limit(value)?);
+            } else if arg == "--mode" {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "missing value after --mode".to_string())?
+                    .into();
+                mode = ProbeMode::from_str(&value)?;
+            } else if let Some(value) = arg.strip_prefix("--mode=") {
+                mode = ProbeMode::from_str(value)?;
+            } else if arg == "--engine" {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "missing value after --engine".to_string())?
+                    .into();
+                engine = Some(DeepEngine::from_str(&value)?);
+            } else if let Some(value) = arg.strip_prefix("--engine=") {
+                engine = Some(DeepEngine::from_str(value)?);
             } else {
                 return Err(format!("unrecognized argument '{arg}'"));
             }
@@ -144,6 +173,8 @@ impl Options {
             verify_limit,
             scenario,
             max_size,
+            mode,
+            engine,
         })
     }
 
@@ -173,9 +204,65 @@ Options:
                              smith_waterman, needleman_wunsch_affine,
                              edit_distance, semiglobal
   --max-size <N>             Skip scenario sizes larger than N
+  --mode <standard|edit-distance-deep>
+                             Probe mode (default: standard)
+  --engine <hcp|full-table|hirschberg|edlib>
+                             Engine filter for --mode edit-distance-deep
   -h, --help                 Print this help
 "
         );
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProbeMode {
+    Standard,
+    EditDistanceDeep,
+}
+
+impl ProbeMode {
+    fn from_str(value: &str) -> Result<Self, String> {
+        match value {
+            "standard" => Ok(Self::Standard),
+            "edit-distance-deep" => Ok(Self::EditDistanceDeep),
+            other => Err(format!("unknown mode '{other}'")),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::EditDistanceDeep => "edit-distance-deep",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeepEngine {
+    Hcp,
+    FullTable,
+    Hirschberg,
+    Edlib,
+}
+
+impl DeepEngine {
+    fn from_str(value: &str) -> Result<Self, String> {
+        match value {
+            "hcp" => Ok(Self::Hcp),
+            "full-table" => Ok(Self::FullTable),
+            "hirschberg" => Ok(Self::Hirschberg),
+            "edlib" => Ok(Self::Edlib),
+            other => Err(format!("unknown engine '{other}'")),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Hcp => "hcp",
+            Self::FullTable => "full-table",
+            Self::Hirschberg => "hirschberg",
+            Self::Edlib => "edlib",
+        }
     }
 }
 
@@ -214,12 +301,30 @@ impl OutputFormat {
 #[derive(Serialize)]
 struct Measurement {
     scenario: &'static str,
+    case: &'static str,
+    engine: &'static str,
     size: usize,
+    query_len: usize,
+    target_len: usize,
     wall_s: f64,
     rss_delta_bytes: u64,
     peak_rss_bytes: u64,
     status: VerificationStatus,
     detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    distance: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_score: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_distance: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary_build_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reconstruction_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_ms: Option<f64>,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -469,6 +574,263 @@ fn run_edit_distance(options: &Options, sys: &mut System) -> Vec<Measurement> {
         .collect()
 }
 
+struct EditDistanceCase {
+    name: &'static str,
+    query: Vec<u8>,
+    target: Vec<u8>,
+}
+
+struct EditDistanceOutcome {
+    status: VerificationStatus,
+    detail: String,
+    distance: Option<u32>,
+    path_score: Option<u32>,
+    path_len: Option<usize>,
+    expected_distance: Option<u32>,
+    stats: Option<HcpRunStats>,
+    verification_ms: Option<f64>,
+}
+
+fn run_edit_distance_deep(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    let engines = deep_engines(options.engine);
+    let mut measurements = Vec::new();
+    for case in edit_distance_cases() {
+        let size = case.query.len().max(case.target.len());
+        if options.max_size.is_some_and(|max_size| size > max_size) {
+            continue;
+        }
+        let expected = edit_distance_linear_space(&case.query, &case.target);
+        for engine in &engines {
+            measurements.push(measure_edit_distance_engine(&case, *engine, expected, sys));
+        }
+    }
+    measurements
+}
+
+fn deep_engines(filter: Option<DeepEngine>) -> Vec<DeepEngine> {
+    match filter {
+        Some(engine) => vec![engine],
+        None => vec![
+            DeepEngine::Hcp,
+            DeepEngine::FullTable,
+            DeepEngine::Hirschberg,
+            DeepEngine::Edlib,
+        ],
+    }
+}
+
+fn edit_distance_cases() -> Vec<EditDistanceCase> {
+    vec![
+        EditDistanceCase {
+            name: "small_regression",
+            query: b"kitten".to_vec(),
+            target: b"sitting".to_vec(),
+        },
+        EditDistanceCase {
+            name: "exact_match",
+            query: deterministic_dna(256),
+            target: deterministic_dna(256),
+        },
+        EditDistanceCase {
+            name: "all_mismatch",
+            query: vec![b'A'; 192],
+            target: vec![b'T'; 192],
+        },
+        EditDistanceCase {
+            name: "single_long_insertion",
+            query: b"ACGTACGT".to_vec(),
+            target: [b"ACGT".as_slice(), vec![b'A'; 192].as_slice(), b"ACGT"].concat(),
+        },
+        EditDistanceCase {
+            name: "single_long_deletion",
+            query: [b"ACGT".as_slice(), vec![b'C'; 192].as_slice(), b"ACGT"].concat(),
+            target: b"ACGTACGT".to_vec(),
+        },
+        EditDistanceCase {
+            name: "homopolymer",
+            query: vec![b'A'; 256],
+            target: vec![b'A'; 128],
+        },
+        EditDistanceCase {
+            name: "repeats",
+            query: repeat_pattern(b"AT", 160),
+            target: repeat_pattern(b"TA", 160),
+        },
+        EditDistanceCase {
+            name: "skewed_lengths",
+            query: deterministic_dna(96),
+            target: deterministic_dna_offset(320, 2),
+        },
+        EditDistanceCase {
+            name: "random_dna",
+            query: deterministic_dna(384),
+            target: deterministic_dna_offset(384, 3),
+        },
+    ]
+}
+
+fn repeat_pattern(pattern: &[u8], len: usize) -> Vec<u8> {
+    (0..len).map(|idx| pattern[idx % pattern.len()]).collect()
+}
+
+fn measure_edit_distance_engine(
+    case: &EditDistanceCase,
+    engine: DeepEngine,
+    expected: u32,
+    sys: &mut System,
+) -> Measurement {
+    let before = rss_bytes(sys);
+    let stop = Arc::new(AtomicBool::new(false));
+    let peak = Arc::new(AtomicU64::new(before));
+    let sampler = spawn_rss_sampler(Arc::clone(&stop), Arc::clone(&peak));
+    let start = Instant::now();
+    let outcome = run_edit_distance_engine(case, engine, expected);
+    let wall_s = start.elapsed().as_secs_f64();
+    stop.store(true, Ordering::Relaxed);
+    let _ = sampler.join();
+    let after = rss_bytes(sys);
+    let peak_rss_bytes = peak.load(Ordering::Relaxed).max(after).max(before);
+    Measurement {
+        scenario: "edit_distance_deep",
+        case: case.name,
+        engine: engine.label(),
+        size: case.query.len().max(case.target.len()),
+        query_len: case.query.len(),
+        target_len: case.target.len(),
+        wall_s,
+        rss_delta_bytes: after.saturating_sub(before),
+        peak_rss_bytes,
+        status: outcome.status,
+        detail: outcome.detail,
+        distance: outcome.distance,
+        path_score: outcome.path_score,
+        path_len: outcome.path_len,
+        expected_distance: outcome.expected_distance,
+        summary_build_ms: outcome.stats.map(|stats| stats.summary_build_ms),
+        reconstruction_ms: outcome.stats.map(|stats| stats.reconstruction_ms),
+        verification_ms: outcome.verification_ms,
+    }
+}
+
+fn run_edit_distance_engine(
+    case: &EditDistanceCase,
+    engine: DeepEngine,
+    expected: u32,
+) -> EditDistanceOutcome {
+    match engine {
+        DeepEngine::Hcp => {
+            let problem = EditDistanceProblem::new(&case.query, &case.target);
+            let (distance, path, stats) = HcpEngine::new(problem.clone()).run_with_stats();
+            let verify_start = Instant::now();
+            let path_score = problem.score_path(&path);
+            let verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+            let passed = distance == expected && path_score == Some(distance);
+            EditDistanceOutcome {
+                status: if passed {
+                    VerificationStatus::Passed
+                } else {
+                    VerificationStatus::Failed
+                },
+                detail: format!("distance={distance}, path_len={}", path.len()),
+                distance: Some(distance),
+                path_score,
+                path_len: Some(path.len()),
+                expected_distance: Some(expected),
+                stats: Some(stats),
+                verification_ms: Some(verification_ms),
+            }
+        }
+        DeepEngine::FullTable => {
+            let distance = edit_distance_full_table(&case.query, &case.target);
+            edit_distance_baseline_outcome("full_table", distance, expected)
+        }
+        DeepEngine::Hirschberg => {
+            let distance = edit_distance_linear_space(&case.query, &case.target);
+            edit_distance_baseline_outcome("linear_space", distance, expected)
+        }
+        DeepEngine::Edlib => match edlib_distance(&case.query, &case.target) {
+            Ok(distance) => edit_distance_baseline_outcome("edlib", distance, expected),
+            Err(err) => EditDistanceOutcome {
+                status: VerificationStatus::NotChecked,
+                detail: err,
+                distance: None,
+                path_score: None,
+                path_len: None,
+                expected_distance: Some(expected),
+                stats: None,
+                verification_ms: None,
+            },
+        },
+    }
+}
+
+fn edit_distance_baseline_outcome(
+    label: &'static str,
+    distance: u32,
+    expected: u32,
+) -> EditDistanceOutcome {
+    EditDistanceOutcome {
+        status: if distance == expected {
+            VerificationStatus::Passed
+        } else {
+            VerificationStatus::Failed
+        },
+        detail: format!("{label}_distance={distance}"),
+        distance: Some(distance),
+        path_score: None,
+        path_len: None,
+        expected_distance: Some(expected),
+        stats: None,
+        verification_ms: None,
+    }
+}
+
+fn edit_distance_linear_space(s: &[u8], t: &[u8]) -> u32 {
+    full_edit_distance(s, t)
+}
+
+fn edit_distance_full_table(s: &[u8], t: &[u8]) -> u32 {
+    let cols = t.len() + 1;
+    let mut dp = vec![0u32; (s.len() + 1) * cols];
+    for row in 1..=s.len() {
+        dp[row * cols] = row as u32;
+    }
+    for (col, cell) in dp.iter_mut().take(cols).enumerate().skip(1) {
+        *cell = col as u32;
+    }
+    for row in 1..=s.len() {
+        for col in 1..=t.len() {
+            let subst = u32::from(s[row - 1] != t[col - 1]);
+            let diag = dp[(row - 1) * cols + col - 1] + subst;
+            let delete = dp[(row - 1) * cols + col] + 1;
+            let insert = dp[row * cols + col - 1] + 1;
+            dp[row * cols + col] = diag.min(delete).min(insert);
+        }
+    }
+    dp[s.len() * cols + t.len()]
+}
+
+fn edlib_distance(s: &[u8], t: &[u8]) -> Result<u32, String> {
+    let query = std::str::from_utf8(s).map_err(|err| err.to_string())?;
+    let target = std::str::from_utf8(t).map_err(|err| err.to_string())?;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(
+            "import edlib,sys; print(edlib.align(sys.argv[1], sys.argv[2], task='distance')['editDistance'])",
+        )
+        .arg(query)
+        .arg(target)
+        .output()
+        .map_err(|err| format!("edlib unavailable: {err}"))?;
+    if !output.status.success() {
+        return Err("edlib unavailable or failed".to_string());
+    }
+    let text = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    text.trim()
+        .parse::<u32>()
+        .map_err(|err| format!("invalid edlib distance: {err}"))
+}
+
 fn run_semiglobal(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048];
     const MATCH_SCORE: i32 = 2;
@@ -531,12 +893,23 @@ where
     let peak_rss_bytes = peak.load(Ordering::Relaxed).max(after).max(before);
     Measurement {
         scenario,
+        case: "deterministic",
+        engine: "hcp",
         size,
+        query_len: size,
+        target_len: size,
         wall_s,
         rss_delta_bytes: after.saturating_sub(before),
         peak_rss_bytes,
         status,
         detail,
+        distance: None,
+        path_score: None,
+        path_len: None,
+        expected_distance: None,
+        summary_build_ms: None,
+        reconstruction_ms: None,
+        verification_ms: None,
     }
 }
 
@@ -783,8 +1156,10 @@ fn affine_add(base: i32, delta: i32) -> i32 {
 fn print_summary(measurements: &[Measurement]) {
     for measurement in measurements {
         eprintln!(
-            "{},{},{:.4},{},{},{}",
+            "{},{},{},{},{:.4},{},{},{}",
             measurement.scenario,
+            measurement.case,
+            measurement.engine,
             measurement.size,
             measurement.wall_s,
             measurement.rss_delta_bytes,
@@ -795,16 +1170,27 @@ fn print_summary(measurements: &[Measurement]) {
 }
 
 fn write_csv(measurements: &[Measurement]) -> Result<(), String> {
-    println!("scenario,size,wall_s,rss_delta_bytes,peak_rss_bytes,status,detail");
+    println!("scenario,case,engine,size,query_len,target_len,wall_s,rss_delta_bytes,peak_rss_bytes,status,distance,path_score,path_len,expected_distance,summary_build_ms,reconstruction_ms,verification_ms,detail");
     for measurement in measurements {
         println!(
-            "{},{},{:.6},{},{},{},{}",
+            "{},{},{},{},{},{},{:.6},{},{},{},{},{},{},{},{},{},{},{}",
             measurement.scenario,
+            measurement.case,
+            measurement.engine,
             measurement.size,
+            measurement.query_len,
+            measurement.target_len,
             measurement.wall_s,
             measurement.rss_delta_bytes,
             measurement.peak_rss_bytes,
             measurement.status.label(),
+            optional_u32(measurement.distance),
+            optional_u32(measurement.path_score),
+            optional_usize(measurement.path_len),
+            optional_u32(measurement.expected_distance),
+            optional_f64(measurement.summary_build_ms),
+            optional_f64(measurement.reconstruction_ms),
+            optional_f64(measurement.verification_ms),
             escape_csv(&measurement.detail)
         );
     }
@@ -813,13 +1199,15 @@ fn write_csv(measurements: &[Measurement]) -> Result<(), String> {
 
 fn write_table(measurements: &[Measurement]) -> Result<(), String> {
     println!(
-        "{:<26} {:>8} {:>10} {:>14} {:>14} {:<12} detail",
-        "scenario", "size", "wall_s", "rss_delta_b", "peak_rss_b", "status"
+        "{:<20} {:<22} {:<12} {:>8} {:>10} {:>14} {:>14} {:<12} detail",
+        "scenario", "case", "engine", "size", "wall_s", "rss_delta_b", "peak_rss_b", "status"
     );
     for measurement in measurements {
         println!(
-            "{:<26} {:>8} {:>10.4} {:>14} {:>14} {:<12} {}",
+            "{:<20} {:<22} {:<12} {:>8} {:>10.4} {:>14} {:>14} {:<12} {}",
             measurement.scenario,
+            measurement.case,
+            measurement.engine,
             measurement.size,
             measurement.wall_s,
             measurement.rss_delta_bytes,
@@ -843,4 +1231,16 @@ fn escape_csv(value: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn optional_u32(value: Option<u32>) -> String {
+    value.map_or_else(String::new, |value| value.to_string())
+}
+
+fn optional_usize(value: Option<usize>) -> String {
+    value.map_or_else(String::new, |value| value.to_string())
+}
+
+fn optional_f64(value: Option<f64>) -> String {
+    value.map_or_else(String::new, |value| format!("{value:.6}"))
 }

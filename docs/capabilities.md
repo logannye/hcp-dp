@@ -10,7 +10,7 @@ validation where applicable.
 | Needleman-Wunsch, linear gap | yes | yes | yes | yes, `global-linear` | Parasail optional | `scale_probe`, report workflow | No SIMD runtime path; Parasail is validation only. |
 | Needleman-Wunsch, affine gap | yes | yes | yes | yes, `global-affine` | Parasail optional after affine calibration | `scale_probe`, report workflow | Boundary state is explicit; still slower than linear modes. |
 | Smith-Waterman, linear gap | yes | yes | yes | yes, `local-linear` | Parasail optional | `scale_probe`, report workflow | Returns the selected local traceback, not flanking unaligned regions. |
-| Edit distance | yes | yes | yes | yes, `edit-distance` | Edlib optional | `scale_probe`, report workflow | Levenshtein distance only. |
+| Edit distance | yes | yes | yes | yes, `edit-distance` | Edlib optional | deep comparison report | Levenshtein distance only; flagship proof point for this alpha. |
 | Semi-global, linear gap | yes | yes | yes | yes, `semiglobal-linear` | no external anchor yet | `scale_probe`, report workflow | Full query against any target interval; swap inputs for the opposite orientation. |
 
 ## Contract Harness
@@ -43,6 +43,7 @@ Performance/correctness reports are generated with:
 
 ```bash
 python3 scripts/perf_report.py
+python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
 ```
 
 The report directory contains:
@@ -54,3 +55,7 @@ target/hcp-dp-report/external-validation.json
 ```
 
 Manual GitHub release validation uploads the same directory as an artifact.
+
+The edit-distance deep report compares the HCP traceback engine against
+full-table and linear-space baselines for fixed scenario families. Edlib is
+included when the optional Python package is installed.

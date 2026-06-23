@@ -75,6 +75,27 @@ def run_scale_probe(verify_limit: int, scenario: str | None) -> list[dict]:
     if proc.returncode != 0:
         raise RuntimeError(f"scale_probe failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
     measurements = json.loads(proc.stdout)
+
+    if scenario is None or scenario == "edit_distance":
+        deep_cmd = [
+            "cargo",
+            "run",
+            "--quiet",
+            "--bin",
+            "scale_probe",
+            "--",
+            "--format",
+            "json",
+            "--mode",
+            "edit-distance-deep",
+        ]
+        proc = run(deep_cmd)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"edit-distance deep probe failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+            )
+        measurements.extend(json.loads(proc.stdout))
+
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     SCALE_PROBE_PATH.write_text(json.dumps(measurements, indent=2) + "\n", encoding="utf-8")
     return measurements
@@ -125,6 +146,7 @@ def write_report(
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     scale_counts = status_counts(measurements)
     external_counts = status_counts(external)
+    edit_deep = [item for item in measurements if item.get("scenario") == "edit_distance_deep"]
 
     lines = [
         "# HCP-DP Correctness And Performance Report",
@@ -149,6 +171,8 @@ def write_report(
         "|---|---:|---:|---:|---:|---|---|",
     ]
     for item in measurements:
+        if item.get("scenario") == "edit_distance_deep":
+            continue
         lines.append(
             "| {scenario} | {size} | {wall_s:.6f} | {rss_delta_bytes} | {peak_rss_bytes} | {status} | {detail} |".format(
                 scenario=item["scenario"],
@@ -158,6 +182,38 @@ def write_report(
                 peak_rss_bytes=item["peak_rss_bytes"],
                 status=item["status"],
                 detail=str(item["detail"]).replace("|", "\\|"),
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Edit Distance Deep Comparison",
+            "",
+            "This section compares the HCP edit-distance path engine against full-table, linear-space, and optional Edlib distance baselines on fixed scenario families.",
+            "",
+            "| Case | Engine | Query | Target | Wall s | Peak RSS bytes | Distance | Expected | Path score | Path len | Summary ms | Reconstruct ms | Verify ms | Status | Detail |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        ]
+    )
+    for item in edit_deep:
+        lines.append(
+            "| {case} | {engine} | {query_len} | {target_len} | {wall_s:.6f} | {peak_rss_bytes} | {distance} | {expected} | {path_score} | {path_len} | {summary_ms} | {reconstruct_ms} | {verify_ms} | {status} | {detail} |".format(
+                case=item.get("case", ""),
+                engine=item.get("engine", ""),
+                query_len=item.get("query_len", ""),
+                target_len=item.get("target_len", ""),
+                wall_s=item.get("wall_s", 0.0),
+                peak_rss_bytes=item.get("peak_rss_bytes", ""),
+                distance="" if item.get("distance") is None else item.get("distance"),
+                expected="" if item.get("expected_distance") is None else item.get("expected_distance"),
+                path_score="" if item.get("path_score") is None else item.get("path_score"),
+                path_len="" if item.get("path_len") is None else item.get("path_len"),
+                summary_ms="" if item.get("summary_build_ms") is None else f"{item.get('summary_build_ms'):.3f}",
+                reconstruct_ms="" if item.get("reconstruction_ms") is None else f"{item.get('reconstruction_ms'):.3f}",
+                verify_ms="" if item.get("verification_ms") is None else f"{item.get('verification_ms'):.3f}",
+                status=item.get("status", ""),
+                detail=str(item.get("detail", "")).replace("|", "\\|"),
             )
         )
 

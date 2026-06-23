@@ -143,8 +143,16 @@ assert_eq "$(printf '%s' "$CLI_SW" | json_field verified)" "true" "CLI local-lin
 
 say "Run CLI: edit-distance"
 CLI_EDIT=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query kitten --target sitting --verify --format json)
+assert_eq "$(printf '%s' "$CLI_EDIT" | json_field schema_version)" "hcp-align.v1" "CLI schema version"
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field distance)" "3" "CLI edit-distance distance"
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field verified)" "true" "CLI edit-distance verified"
+
+say "Run CLI: compact/full operation detail and output file"
+CLI_EDIT_FULL=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query ACGT --target ACGA --operation-detail full --format json)
+FULL_OP_COUNT=$(printf '%s' "$CLI_EDIT_FULL" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["operations"]))')
+assert_eq "$FULL_OP_COUNT" "4" "CLI full operation count"
+cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query kitten --target sitting --verify --format json --output "${TMP_DIR}/edit.json"
+assert_eq "$(cat "${TMP_DIR}/edit.json" | json_field distance)" "3" "CLI output file distance"
 
 say "Run CLI: semiglobal-linear"
 CLI_SEMI=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- semiglobal-linear --query ACGT --target TTACGTTT --match 2 --mismatch-penalty 1 --gap -2 --verify --format json)
@@ -209,6 +217,7 @@ if [[ -n "${SCALE_PROBE_MAX_SIZE}" ]]; then
   SCALE_PROBE_ARGS+=(--max-size "${SCALE_PROBE_MAX_SIZE}")
 fi
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- "${SCALE_PROBE_ARGS[@]}" >/dev/null
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine hcp --max-size 128 --format json >/dev/null
 
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Benches (dev mode, faster)"

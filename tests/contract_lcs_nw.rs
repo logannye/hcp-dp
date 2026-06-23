@@ -363,6 +363,33 @@ fn affine_edge_cases_hold() {
 }
 
 #[test]
+fn edit_distance_edge_cases_hold() {
+    let long_insert = [b"ACGT".as_slice(), vec![b'A'; 64].as_slice(), b"ACGT"].concat();
+    let long_delete = [b"ACGT".as_slice(), vec![b'C'; 64].as_slice(), b"ACGT"].concat();
+    let cases: Vec<(&[u8], &[u8])> = vec![
+        (b"", b""),
+        (b"", b"ABC"),
+        (b"ABC", b""),
+        (b"AAAA", b"TTTT"),
+        (&long_insert, b"ACGTACGT"),
+        (b"ACGTACGT", &long_delete),
+        (b"AAAAAAAA", b"AAAA"),
+        (b"ATATATAT", b"TATATA"),
+        (b"ACGTACGT", b"ACGTTCGT"),
+    ];
+
+    for (s, t) in cases {
+        let problem = EditDistanceProblem::new(s, t);
+        assert_summary_contract(&problem);
+        assert_edit_split_contract(&problem);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_edit_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
 fn smith_waterman_edge_cases_hold() {
     type SwCase<'a> = (&'a [u8], &'a [u8], i32, i32, i32);
     let cases: &[SwCase<'_>] = &[
@@ -401,28 +428,6 @@ fn smith_waterman_optimized_split_regressions_hold() {
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
             assert_sw_path(&problem, cost, &path);
-        }
-    }
-}
-
-#[test]
-fn edit_distance_edge_cases_hold() {
-    let cases: &[(&[u8], &[u8])] = &[
-        (b"", b""),
-        (b"", b"ABC"),
-        (b"ABC", b""),
-        (b"kitten", b"sitting"),
-        (b"AAAAAA", b"AAA"),
-        (b"ACGTACGT", b"TGCATGCA"),
-        (b"ACGTACGT", b"ACGT"),
-        (b"GGGGTTTT", b"GGTT"),
-    ];
-
-    for (s, t) in cases {
-        let problem = EditDistanceProblem::new(s, t);
-        for block_size in 1..=problem.n().max(1) {
-            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
-            assert_edit_path(&problem, cost, &path);
         }
     }
 }

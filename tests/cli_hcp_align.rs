@@ -36,21 +36,31 @@ fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("stderr must be utf8")
 }
 
-fn with_normalized_elapsed(mut value: Value) -> Value {
+fn with_normalized_timings(mut value: Value) -> Value {
     value["elapsed_ms"] = json!("<elapsed_ms>");
+    value["summary_build_ms"] = json!("<summary_build_ms>");
+    value["reconstruction_ms"] = json!("<reconstruction_ms>");
+    value["verification_ms"] = json!("<verification_ms>");
     value
 }
 
-fn normalize_tsv_elapsed(text: &str) -> String {
+fn normalize_tsv_timings(text: &str) -> String {
     text.lines()
         .map(|line| {
             let mut fields: Vec<&str> = line.split('\t').collect();
-            if fields
-                .last()
-                .is_some_and(|last| last.parse::<f64>().is_ok())
-            {
-                let last_idx = fields.len() - 1;
-                fields[last_idx] = "<elapsed_ms>";
+            let replacements = [
+                "<summary_build_ms>",
+                "<reconstruction_ms>",
+                "<verification_ms>",
+                "<elapsed_ms>",
+            ];
+            if fields.len() >= replacements.len() {
+                let start = fields.len() - replacements.len();
+                for (idx, replacement) in replacements.iter().enumerate() {
+                    if fields[start + idx].parse::<f64>().is_ok() {
+                        fields[start + idx] = replacement;
+                    }
+                }
             }
             fields.join("\t")
         })
@@ -244,6 +254,179 @@ fn verify_limit_can_report_path_only() {
 }
 
 #[test]
+fn operation_detail_controls_json_trace_size() {
+    let summary = run(&[
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--format",
+        "json",
+    ]);
+    assert!(summary.status.success(), "{}", stderr(&summary));
+    let summary_json: Value = serde_json::from_str(&stdout(&summary)).expect("valid json");
+    assert!(summary_json.get("operations").is_none());
+    assert_eq!(summary_json["operation_counts"][0]["op"], "match");
+
+    let none = run(&[
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--operation-detail",
+        "none",
+        "--format",
+        "json",
+    ]);
+    assert!(none.status.success(), "{}", stderr(&none));
+    let none_json: Value = serde_json::from_str(&stdout(&none)).expect("valid json");
+    assert!(none_json.get("operations").is_none());
+    assert!(none_json.get("operation_counts").is_none());
+
+    let full = run(&[
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--operation-detail",
+        "full",
+        "--format",
+        "json",
+    ]);
+    assert!(full.status.success(), "{}", stderr(&full));
+    let full_json: Value = serde_json::from_str(&stdout(&full)).expect("valid json");
+    assert_eq!(full_json["operations"].as_array().unwrap().len(), 4);
+    assert_eq!(full_json["operation_counts"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn output_flag_writes_to_file() {
+    let output_path = temp_file("output-json", "");
+    let output = run(&[
+        "edit-distance",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--format",
+        "json",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    let parsed: Value =
+        serde_json::from_str(&fs::read_to_string(output_path).expect("output readable"))
+            .expect("valid json");
+    assert_eq!(parsed["distance"], 3);
+}
+
+#[test]
+fn continue_on_error_emits_failed_batch_records() {
+    let query = temp_file("continue-query", ">q1\nAC\n>q2\nAA\n");
+    let target = temp_file("continue-target", ">t1\nAC\n>t2\nAT\n");
+    let output = run(&[
+        "edit-distance",
+        "--query-file",
+        query.to_str().unwrap(),
+        "--target-file",
+        target.to_str().unwrap(),
+        "--block-size",
+        "0",
+        "--continue-on-error",
+        "--format",
+        "jsonl",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let rows: Vec<Value> = stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("valid jsonl"))
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["verification_status"], "failed");
+    assert!(rows[0]["error"]
+        .as_str()
+        .is_some_and(|err| err.contains("block size")));
+}
+
+#[test]
+fn progress_always_writes_to_stderr() {
+    let query = temp_file("progress-query", ">q1\nAC\n>q2\nAA\n");
+    let target = temp_file("progress-target", ">t1\nAC\n>t2\nAT\n");
+    let output = run(&[
+        "edit-distance",
+        "--query-file",
+        query.to_str().unwrap(),
+        "--target-file",
+        target.to_str().unwrap(),
+        "--progress",
+        "always",
+        "--format",
+        "jsonl",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("hcp-align: 2/2"));
+}
+
+#[test]
+fn threads_one_works_without_parallel_feature() {
+    let output = run(&[
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--threads",
+        "1",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[cfg(not(feature = "parallel"))]
+#[test]
+fn threads_above_one_requires_parallel_feature() {
+    let output = run(&[
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--threads",
+        "2",
+        "--format",
+        "json",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("parallel"));
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn threads_above_one_works_with_parallel_feature() {
+    let query = temp_file("threads-query", ">q1\nAC\n>q2\nAA\n");
+    let target = temp_file("threads-target", ">t1\nAC\n>t2\nAT\n");
+    let output = run(&[
+        "edit-distance",
+        "--query-file",
+        query.to_str().unwrap(),
+        "--target-file",
+        target.to_str().unwrap(),
+        "--threads",
+        "2",
+        "--format",
+        "jsonl",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output).lines().count(), 2);
+}
+
+#[test]
 fn json_output_has_stable_golden_contract() {
     let output = run(&[
         "edit-distance",
@@ -260,8 +443,10 @@ fn json_output_has_stable_golden_contract() {
     assert!(output.status.success(), "{}", stderr(&output));
     let parsed: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
     assert_eq!(
-        with_normalized_elapsed(parsed),
+        with_normalized_timings(parsed),
         json!({
+            "schema_version": "hcp-align.v1",
+            "engine": "hcp-dp",
             "pair_index": 0,
             "query_id": "query",
             "target_id": "target",
@@ -276,13 +461,14 @@ fn json_output_has_stable_golden_contract() {
             "target_start": 0,
             "target_end": 4,
             "cigar": "4=",
-            "operations": [
-                {"op": "match", "query_pos": 0, "target_pos": 0, "query_base": "A", "target_base": "A"},
-                {"op": "match", "query_pos": 1, "target_pos": 1, "query_base": "C", "target_base": "C"},
-                {"op": "match", "query_pos": 2, "target_pos": 2, "query_base": "G", "target_base": "G"},
-                {"op": "match", "query_pos": 3, "target_pos": 3, "query_base": "T", "target_base": "T"}
+            "operation_counts": [
+                {"op": "match", "count": 4}
             ],
             "block_size": 1,
+            "path_length": 5,
+            "summary_build_ms": "<summary_build_ms>",
+            "reconstruction_ms": "<reconstruction_ms>",
+            "verification_ms": "<verification_ms>",
             "elapsed_ms": "<elapsed_ms>"
         })
     );
@@ -307,12 +493,14 @@ fn jsonl_output_has_stable_batch_golden_contract() {
     assert!(output.status.success(), "{}", stderr(&output));
     let rows: Vec<Value> = stdout(&output)
         .lines()
-        .map(|line| with_normalized_elapsed(serde_json::from_str(line).expect("valid jsonl")))
+        .map(|line| with_normalized_timings(serde_json::from_str(line).expect("valid jsonl")))
         .collect();
     assert_eq!(
         rows,
         json!([
             {
+                "schema_version": "hcp-align.v1",
+                "engine": "hcp-dp",
                 "pair_index": 0,
                 "query_id": "q1",
                 "target_id": "t1",
@@ -327,14 +515,19 @@ fn jsonl_output_has_stable_batch_golden_contract() {
                 "target_start": 0,
                 "target_end": 2,
                 "cigar": "2=",
-                "operations": [
-                    {"op": "match", "query_pos": 0, "target_pos": 0, "query_base": "A", "target_base": "A"},
-                    {"op": "match", "query_pos": 1, "target_pos": 1, "query_base": "C", "target_base": "C"}
+                "operation_counts": [
+                    {"op": "match", "count": 2}
                 ],
                 "block_size": 1,
+                "path_length": 3,
+                "summary_build_ms": "<summary_build_ms>",
+                "reconstruction_ms": "<reconstruction_ms>",
+                "verification_ms": "<verification_ms>",
                 "elapsed_ms": "<elapsed_ms>"
             },
             {
+                "schema_version": "hcp-align.v1",
+                "engine": "hcp-dp",
                 "pair_index": 1,
                 "query_id": "q2",
                 "target_id": "t2",
@@ -349,11 +542,15 @@ fn jsonl_output_has_stable_batch_golden_contract() {
                 "target_start": 0,
                 "target_end": 2,
                 "cigar": "1=1X",
-                "operations": [
-                    {"op": "match", "query_pos": 0, "target_pos": 0, "query_base": "A", "target_base": "A"},
-                    {"op": "mismatch", "query_pos": 1, "target_pos": 1, "query_base": "A", "target_base": "T"}
+                "operation_counts": [
+                    {"op": "match", "count": 1},
+                    {"op": "mismatch", "count": 1}
                 ],
                 "block_size": 1,
+                "path_length": 3,
+                "summary_build_ms": "<summary_build_ms>",
+                "reconstruction_ms": "<reconstruction_ms>",
+                "verification_ms": "<verification_ms>",
                 "elapsed_ms": "<elapsed_ms>"
             }
         ])
@@ -379,8 +576,8 @@ fn tsv_and_cigar_outputs_have_stable_golden_contracts() {
     ]);
     assert!(tsv.status.success(), "{}", stderr(&tsv));
     assert_eq!(
-        normalize_tsv_elapsed(&stdout(&tsv)),
-        "pair_index\tquery_id\ttarget_id\tmode\tscore\tdistance\tpath_score\tverification_status\tquery_start\tquery_end\ttarget_start\ttarget_end\tcigar\tblock_size\telapsed_ms\n0\tquery\ttarget\tedit-distance\t\t0\t0\tfull\t0\t4\t0\t4\t4=\t1\t<elapsed_ms>"
+        normalize_tsv_timings(&stdout(&tsv)),
+        "pair_index\tquery_id\ttarget_id\tmode\tscore\tdistance\tpath_score\tverification_status\tquery_start\tquery_end\ttarget_start\ttarget_end\tcigar\tblock_size\tpath_length\tsummary_build_ms\treconstruction_ms\tverification_ms\telapsed_ms\n0\tquery\ttarget\tedit-distance\t\t0\t0\tfull\t0\t4\t0\t4\t4=\t1\t5\t<summary_build_ms>\t<reconstruction_ms>\t<verification_ms>\t<elapsed_ms>"
     );
 
     let cigar = run(&[

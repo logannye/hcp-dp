@@ -7,6 +7,16 @@
 use crate::blocks::BlockSummary;
 use crate::traits::{HcpProblem, SummaryApply};
 use crate::utils::default_block_size;
+use std::time::Instant;
+
+/// Timing and size statistics from one engine run.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HcpRunStats {
+    /// Milliseconds spent building summaries, applying them, and building the summary tree.
+    pub summary_build_ms: f64,
+    /// Milliseconds spent recursively reconstructing the path.
+    pub reconstruction_ms: f64,
+}
 
 /// Height-compressed DP engine for one problem instance.
 pub struct HcpEngine<P: HcpProblem> {
@@ -53,26 +63,46 @@ impl<P: HcpProblem> HcpEngine<P> {
     /// # Panics
     /// Panics if the problem violates endpoint reconstruction invariants.
     pub fn run(&self) -> (P::Cost, Vec<P::State>) {
+        let (cost, path, _stats) = self.run_with_stats();
+        (cost, path)
+    }
+
+    /// Run the DP and return `(optimal_cost, optimal_path, stats)`.
+    ///
+    /// # Panics
+    /// Panics if the problem violates endpoint reconstruction invariants.
+    pub fn run_with_stats(&self) -> (P::Cost, Vec<P::State>, HcpRunStats) {
         #[cfg(feature = "tracing")]
         let span = tracing::info_span!("hcp_run");
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
+        let build_start = Instant::now();
         let BuildArtifacts {
             blocks,
             tree,
             frontier_t,
         } = self.build_block_summaries();
+        let summary_build_ms = build_start.elapsed().as_secs_f64() * 1000.0;
 
         let beta_0 = self.problem.initial_boundary();
         let beta_t = self.problem.terminal_boundary(&frontier_t);
+        let reconstruct_start = Instant::now();
         let path = if blocks.is_empty() {
             self.problem.reconstruct_leaf(0, 0, &beta_0, &beta_t)
         } else {
             self.reconstruct_path_on_blocks(&blocks, &tree, 0, blocks.len(), &beta_0, &beta_t)
         };
+        let reconstruction_ms = reconstruct_start.elapsed().as_secs_f64() * 1000.0;
         let cost = self.problem.extract_cost(&frontier_t, &beta_t);
-        (cost, path)
+        (
+            cost,
+            path,
+            HcpRunStats {
+                summary_build_ms,
+                reconstruction_ms,
+            },
+        )
     }
 
     fn build_block_summaries(&self) -> BuildArtifacts<P> {

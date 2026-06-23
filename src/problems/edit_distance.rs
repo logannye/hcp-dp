@@ -81,14 +81,14 @@ impl<'a> HcpProblem for EditDistanceProblem<'a> {
 
     fn forward_step(&self, layer: usize, frontier: &Self::Frontier) -> Self::Frontier {
         let ch = self.s[layer];
-        let mut next = Vec::with_capacity(self.m() + 1);
-        next.push(frontier.costs[0] + 1);
+        let mut next = vec![0; self.m() + 1];
+        next[0] = frontier.costs[0] + 1;
         for col in 1..=self.m() {
             let subst = u32::from(ch != self.t[col - 1]);
             let diag = frontier.costs[col - 1] + subst;
             let delete = frontier.costs[col] + 1;
             let insert = next[col - 1] + 1;
-            next.push(diag.min(delete).min(insert));
+            next[col] = diag.min(delete).min(insert);
         }
         EditDistanceFrontier { costs: next }
     }
@@ -254,18 +254,18 @@ impl<'a> SummaryApply<EditDistanceFrontier> for EditDistanceSummary<'a> {
             "edit-distance frontier width mismatch"
         );
         let mut current = frontier.clone();
+        let mut next = vec![0; self.t.len() + 1];
         for layer in self.start..self.end {
             let ch = self.s[layer];
-            let mut next = Vec::with_capacity(self.t.len() + 1);
-            next.push(current.costs[0] + 1);
+            next[0] = current.costs[0] + 1;
             for col in 1..=self.t.len() {
                 let subst = u32::from(ch != self.t[col - 1]);
                 let diag = current.costs[col - 1] + subst;
                 let delete = current.costs[col] + 1;
                 let insert = next[col - 1] + 1;
-                next.push(diag.min(delete).min(insert));
+                next[col] = diag.min(delete).min(insert);
             }
-            current = EditDistanceFrontier { costs: next };
+            std::mem::swap(&mut current.costs, &mut next);
         }
         current
     }

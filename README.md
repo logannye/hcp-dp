@@ -7,6 +7,10 @@ The primary live-use surface is `hcp-align`, a command-line alignment tool for
 biosequence-style workloads. The library remains intentionally small while the
 height-compressed contract is hardened problem by problem.
 
+The current public proof point is exact edit-distance traceback with a
+reproducible report comparing HCP-DP against full-table, linear-space, and
+optional Edlib baselines.
+
 This repository was reset around a correctness-first contract. The public API is
 intentionally small until each built-in problem proves:
 
@@ -109,7 +113,12 @@ cargo run --example align
 hcp-align global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify
 bash scripts/check.sh
 cargo run --bin scale_probe -- --format table --verify-limit 512
+python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
 ```
+
+GitHub alpha binaries are produced by the manual `Release Alpha` workflow. Each
+artifact contains `hcp-align`, README, license, and a SHA-256 checksum. This
+repository is not published to crates.io yet.
 
 Example:
 
@@ -170,8 +179,13 @@ hcp-align edit-distance \
 Output formats are `text`, `json`, `jsonl`, `tsv`, and `cigar`. Every pair
 reports record ids, score or distance, independently scored path value,
 verification status, query/target coordinates, CIGAR-like operations using `=`,
-`X`, `D`, and `I`, block size, and elapsed milliseconds. `--show-alignment`
-adds aligned strings.
+`X`, `D`, and `I`, block size, path length, timing fields, and elapsed
+milliseconds. `--show-alignment` adds aligned strings.
+
+Structured output defaults to compact operation counts. Use
+`--operation-detail full` to emit every alignment step, or
+`--operation-detail none` for large batch runs where only score, coordinates,
+and CIGAR are needed. Use `--output <PATH>` to write results to a file.
 
 `--verify` checks the returned objective against a full-table baseline when
 `max(query_len, target_len) <= --verify-limit`. The default limit is `2048`; use
@@ -190,6 +204,7 @@ Full CLI reference: [docs/cli.md](docs/cli.md).
 | Scaling smoke probe | `cargo run --bin scale_probe -- --format table` |
 | One probe scenario | `cargo run --bin scale_probe -- --scenario semiglobal --format json` |
 | Bounded probe sizes | `cargo run --bin scale_probe -- --max-size 1024 --format table` |
+| Edit-distance deep proof | `cargo run --bin scale_probe -- --mode edit-distance-deep --format json` |
 | Optional external validation | `python3 scripts/validate_external.py` |
 | Local report | `python3 scripts/perf_report.py` |
 | Optional benchmarks | `RUN_BENCH=1 bash scripts/check.sh` |

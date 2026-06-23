@@ -14,5 +14,5 @@ pub mod traits;
 pub mod utils;
 
 pub use crate::builder::HcpEngineBuilder;
-pub use crate::engine::HcpEngine;
+pub use crate::engine::{HcpEngine, HcpRunStats};
 pub use crate::traits::{HcpProblem, SummaryApply};

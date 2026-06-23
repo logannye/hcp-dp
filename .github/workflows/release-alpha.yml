@@ -1,0 +1,67 @@
+name: Release Alpha
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-binary:
+    name: Build alpha binary
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: hcp-align-linux-x86_64
+            binary: hcp-align
+          - os: macos-latest
+            artifact: hcp-align-macos
+            binary: hcp-align
+          - os: windows-latest
+            artifact: hcp-align-windows-x86_64
+            binary: hcp-align.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release --bin hcp-align
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "target/alpha/${{ matrix.artifact }}"
+          cp "target/release/${{ matrix.binary }}" "target/alpha/${{ matrix.artifact }}/"
+          cp README.md LICENSE "target/alpha/${{ matrix.artifact }}/"
+          (cd target/alpha && tar -czf "${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}")
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path = Path("target/alpha/${{ matrix.artifact }}.tar.gz")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          path.with_suffix(path.suffix + ".sha256").write_text(f"{digest}  {path.name}\n", encoding="utf-8")
+          PY
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/alpha/${{ matrix.artifact }}.tar.gz
+            target/alpha/${{ matrix.artifact }}.tar.gz.sha256
+
+  report:
+    name: Generate validation report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install external validators
+        run: python -m pip install parasail edlib
+      - name: Generate release report
+        run: python scripts/perf_report.py --external-required --verify-limit 512
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hcp-dp-alpha-report
+          path: target/hcp-dp-report/

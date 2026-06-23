@@ -304,6 +304,10 @@ assert_eq!(problem.score_path(&path), Some(cost));
 ```
 
 Use `HcpEngine::linear_space(problem)` when retained memory is the priority.
+For a complete custom recurrence, see
+[`examples/custom_problem.rs`](examples/custom_problem.rs), which implements a
+two-state layered shortest-path DP with min-plus interval summaries and runs the
+public `hcp_dp::contract` checks.
 
 ## Capability Matrix
 

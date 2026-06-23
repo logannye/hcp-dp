@@ -128,6 +128,12 @@ SW_SCORE=$(printf '%s' "$SW_OUT" | grep -E "^Local alignment score:" | parse_num
 assert_nonempty "$SW_SCORE" "Smith-Waterman score"
 assert_eq "$SW_SCORE" "10" "Smith-Waterman local alignment score"
 
+say "Run example: custom_problem"
+CUSTOM_OUT=$(cargo_with_features run --quiet --example custom_problem ${RELEASE_FLAG:-})
+CUSTOM_COST=$(printf '%s' "$CUSTOM_OUT" | grep -E "^Two-state shortest path cost:" | parse_num)
+assert_nonempty "$CUSTOM_COST" "Custom problem cost"
+assert_eq "$CUSTOM_COST" "4" "Custom problem shortest path cost"
+
 say "Run CLI: global-linear"
 CLI_NW=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify --format json)
 assert_eq "$(printf '%s' "$CLI_NW" | json_field score)" "0" "CLI global-linear score"

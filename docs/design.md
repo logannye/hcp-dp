@@ -172,6 +172,7 @@ Start with:
 - `src/traits.rs` for the problem contract,
 - `src/engine.rs` for summary-tree execution and reconstruction,
 - `src/contract.rs` for reusable bounded-test helpers,
+- `examples/custom_problem.rs` for a minimal custom HCP problem,
 - `src/problems/edit_distance.rs` for the flagship proof point,
 - `src/problems/dtw.rs` for the first non-sequence-alignment proof point,
 - `src/alignment.rs` for path-to-alignment formatting,

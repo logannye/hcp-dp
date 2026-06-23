@@ -6,6 +6,11 @@ The bar is intentionally high: a problem should not be exported from
 `problems` until it can report an exact objective and reconstruct an exact path
 under the shared contract harness.
 
+For a runnable minimal implementation, see
+[`examples/custom_problem.rs`](../examples/custom_problem.rs). It implements a
+two-state layered shortest-path DP with min-plus interval summaries and runs the
+same public `hcp_dp::contract` helpers described below.
+
 ## The Contract In One Page
 
 Model the DP as layers:
@@ -174,6 +179,8 @@ After correctness is established, optimize one piece at a time:
 - `src/problems/edit_distance.rs`: simple minimization grid with exact traceback
   plus specialized score/path backends.
 - `src/contract.rs`: reusable bounded-test helpers for problem authors.
+- `examples/custom_problem.rs`: minimal custom problem implementation using
+  min-plus interval summaries and the public contract helpers.
 - `src/problems/nw_affine.rs`: stateful boundaries for affine gaps.
 - `src/problems/smith_waterman.rs`: local alignment with variable start/end.
 - `src/problems/semiglobal.rs`: free target prefix/suffix semantics.

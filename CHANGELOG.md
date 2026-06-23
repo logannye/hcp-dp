@@ -25,6 +25,8 @@ the alpha release when they improve correctness or clarity.
   the interval-summary and endpoint-constrained traceback contract.
 - Added public `contract` validation helpers for downstream `HcpProblem`
   implementations.
+- Added a runnable custom-problem example showing min-plus interval summaries
+  and public contract checks.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

@@ -21,6 +21,8 @@ the alpha release when they improve correctness or clarity.
   checked-in bounded sample report under `docs/sample-report.md`.
 - Added `problems::dtw::DtwProblem`, the first non-sequence-alignment public
   problem, with contract tests and `scale_probe` coverage.
+- Added `docs/problem-author-guide.md` for implementing new problems against
+  the interval-summary and endpoint-constrained traceback contract.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

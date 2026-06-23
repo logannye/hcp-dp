@@ -175,3 +175,7 @@ Start with:
 - `src/problems/dtw.rs` for the first non-sequence-alignment proof point,
 - `src/alignment.rs` for path-to-alignment formatting,
 - `src/bin/hcp_align.rs` for the user-facing CLI.
+
+To implement another problem, read
+[`docs/problem-author-guide.md`](problem-author-guide.md) before exporting it
+from `problems`.

@@ -326,6 +326,7 @@ See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
 
 - [CLI reference](docs/cli.md)
 - [Technical design](docs/design.md)
+- [Problem author guide](docs/problem-author-guide.md)
 - [Capability matrix](docs/capabilities.md)
 - [Output schema reference](docs/output-schema.md)
 - [Sample report](docs/sample-report.md)

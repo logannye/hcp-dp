@@ -16,6 +16,7 @@ validation where applicable.
 | Edit distance, Myers bit-vector | yes | no | n/a | yes, `edit-distance --score-only` | checked against linear-space baseline | deep comparison report, `myers` engine | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | n/a | report tool only | checked against linear-space baseline | deep comparison report, `myers-u64` engine | Exact distance only; pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | yes, `semiglobal-linear` | no external anchor yet | `scale_probe`, report workflow | Full query against any target interval; swap inputs for the opposite orientation. |
+| Dynamic time warping | yes | yes | yes | no | no external anchor yet | `scale_probe` | Library/report proof point for non-sequence-grid DP; non-empty series only. |
 
 ## Contract Harness
 

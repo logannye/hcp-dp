@@ -11,6 +11,7 @@ use std::{
 
 use hcp_dp::{
     problems::{
+        dtw::DtwProblem,
         edit_distance::{
             distance_adaptive_banded, distance_linear_space, distance_myers, distance_myers_u64,
             trace_adaptive_banded, EditDistanceProblem,
@@ -67,6 +68,9 @@ fn main() {
             }
             if options.should_run("semiglobal") {
                 measurements.extend(run_semiglobal(&options, &mut sys));
+            }
+            if options.should_run("dtw") {
+                measurements.extend(run_dtw(&options, &mut sys));
             }
         }
         ProbeMode::EditDistanceDeep => {
@@ -209,7 +213,7 @@ Options:
   --verify-limit <N>         Largest size checked against full-table baselines (default: 512)
   --scenario <name>          Run only one scenario: lcs, needleman_wunsch,
                              smith_waterman, needleman_wunsch_affine,
-                             edit_distance, semiglobal
+                             edit_distance, semiglobal, dtw
   --max-size <N>             Skip scenario sizes larger than N
   --mode <standard|edit-distance-deep>
                              Probe mode (default: standard)
@@ -1003,6 +1007,43 @@ fn run_semiglobal(options: &Options, sys: &mut System) -> Vec<Measurement> {
         .collect()
 }
 
+fn run_dtw(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    const SIZES: &[usize] = &[32, 64, 128, 256, 512];
+    options
+        .sizes(SIZES)
+        .map(|len| {
+            measure("dtw", len, sys, || {
+                let query = deterministic_series(len);
+                let target = deterministic_series_offset(len, 3);
+                let problem = DtwProblem::new(&query, &target);
+                let (cost, path) = HcpEngine::new(problem.clone()).run();
+                let path_score = problem.score_path(&path);
+                if len <= options.verify_limit {
+                    let baseline = problem.full_table_cost();
+                    if baseline == cost && path_score == Some(cost) {
+                        (VerificationStatus::Passed, format!("cost={cost}"))
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("baseline={baseline}, cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                } else if path_score == Some(cost) {
+                    (
+                        VerificationStatus::NotChecked,
+                        format!("cost={cost}, path_len={}", path.len()),
+                    )
+                } else {
+                    (
+                        VerificationStatus::Failed,
+                        format!("cost={cost}, path_score={path_score:?}"),
+                    )
+                }
+            })
+        })
+        .collect()
+}
+
 fn measure<F>(scenario: &'static str, size: usize, sys: &mut System, run: F) -> Measurement
 where
     F: FnOnce() -> (VerificationStatus, String),
@@ -1078,6 +1119,27 @@ fn deterministic_dna(len: usize) -> Vec<u8> {
 fn deterministic_dna_offset(len: usize, offset: usize) -> Vec<u8> {
     const ALPHABET: &[u8] = b"ACGT";
     (0..len).map(|i| ALPHABET[(i * 5 + offset) % 4]).collect()
+}
+
+fn deterministic_series(len: usize) -> Vec<i32> {
+    (0..len)
+        .map(|idx| {
+            let wave = ((idx * 17 + 11) % 31) as i32 - 15;
+            let trend = (idx % 7) as i32 - 3;
+            wave + trend
+        })
+        .collect()
+}
+
+fn deterministic_series_offset(len: usize, offset: usize) -> Vec<i32> {
+    (0..len)
+        .map(|idx| {
+            let shifted = idx + offset;
+            let wave = ((shifted * 13 + 5) % 29) as i32 - 14;
+            let trend = (shifted % 5) as i32 - 2;
+            wave + trend
+        })
+        .collect()
 }
 
 fn full_lcs_len(s: &[u8], t: &[u8]) -> u32 {

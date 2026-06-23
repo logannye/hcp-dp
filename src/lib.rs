@@ -1,8 +1,9 @@
 //! Exact traceback from height-compressed dynamic-programming summaries.
 //!
 //! This crate provides a generic summary-tree engine plus correctness-tested
-//! sequence-alignment kernels. The public surface is intentionally small while
-//! each exported problem is proven against the same contract:
+//! sequence-alignment kernels plus a small dynamic-time-warping implementation.
+//! The public surface is intentionally small while each exported problem is
+//! proven against the same contract:
 //!
 //! - interval summaries apply like direct DP replay,
 //! - adjacent summaries merge into the direct combined interval,

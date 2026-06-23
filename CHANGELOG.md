@@ -19,6 +19,8 @@ the alpha release when they improve correctness or clarity.
   `scale_probe --mode edit-distance-deep`.
 - Added `scripts/perf_report.py --max-size` and `--sample-output`, plus a
   checked-in bounded sample report under `docs/sample-report.md`.
+- Added `problems::dtw::DtwProblem`, the first non-sequence-alignment public
+  problem, with contract tests and `scale_probe` coverage.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

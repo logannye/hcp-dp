@@ -6,7 +6,8 @@ summaries can be used to recover an exact traceback without storing the full DP
 table.
 
 The current alpha proves that claim on correctness-tested sequence-alignment
-problems before expanding the public surface.
+problems and a small dynamic-time-warping implementation before expanding the
+public surface further.
 
 ## Model
 
@@ -71,9 +72,10 @@ HCP-DP factors exact compressed traceback into a reusable contract:
 - reconstruction is constrained by explicit boundaries,
 - each problem supplies only the logic needed for its recurrence.
 
-The current alpha uses biosequence alignment because it offers clear correctness
-baselines, independent external validators, and practical command-line
-workflows.
+The current alpha uses biosequence alignment as the first user-facing product
+because it offers clear correctness baselines, independent external validators,
+and practical command-line workflows. Dynamic time warping is included as a
+library/report proof point for the broader frontier-DP contract.
 
 ## Efficiency Model
 
@@ -147,6 +149,7 @@ preserving the exact-path contract as the architecture to extend.
 - Smith-Waterman local alignment with linear gaps
 - Levenshtein edit distance
 - semi-global linear-gap alignment
+- dynamic time warping over integer-valued series
 - adaptive-banded exact edit-distance traceback
 - Myers exact edit-distance scoring for arbitrary pattern lengths
 
@@ -169,5 +172,6 @@ Start with:
 - `src/traits.rs` for the problem contract,
 - `src/engine.rs` for summary-tree execution and reconstruction,
 - `src/problems/edit_distance.rs` for the flagship proof point,
+- `src/problems/dtw.rs` for the first non-sequence-alignment proof point,
 - `src/alignment.rs` for path-to-alignment formatting,
 - `src/bin/hcp_align.rs` for the user-facing CLI.

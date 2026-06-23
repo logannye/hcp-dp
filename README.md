@@ -5,14 +5,16 @@
 [![License: MIT](https://img.shields.io/github/license/logannye/hcp-dp.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/logannye/hcp-dp?include_prereleases&label=release)](https://github.com/logannye/hcp-dp/releases)
 
-HCP-DP is a Rust dynamic-programming engine and `hcp-align` CLI for **exact
-sequence-alignment traceback without storing full DP tables**.
+HCP-DP is a Rust dynamic-programming engine for **exact traceback without
+storing full DP tables**, plus the `hcp-align` CLI for sequence alignment.
 
 The project is built around height-compressed dynamic-programming summaries:
 interval operators that compose like the original recurrence and still allow an
-exact path to be reconstructed. The current alpha focuses on biosequence-style
-alignment where correctness can be checked against independent baselines and the
-CLI is immediately useful.
+exact path to be reconstructed. The current alpha focuses its CLI on
+biosequence-style alignment, where correctness can be checked against
+independent baselines and the workflow is immediately useful. The Rust library
+also includes dynamic time warping as an early proof that the contract is not
+limited to sequence-alignment recurrences.
 
 ## What You Can Use Today
 
@@ -280,6 +282,7 @@ implementations:
 - `HcpProblem`
 - `SummaryApply`
 - `alignment::AlignmentTrace`
+- `problems::dtw::DtwProblem`
 - `problems::edit_distance::EditDistanceProblem`
 - `problems::lcs::LcsProblem`
 - `problems::nw_align::NwProblem`
@@ -315,6 +318,7 @@ Use `HcpEngine::linear_space(problem)` when retained memory is the priority.
 | Edit distance, Myers bit-vector | yes | no | yes, `edit-distance --score-only` | checked internally | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | report tool only | checked internally | Pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | no external anchor yet | Full query against any target interval. |
+| Dynamic time warping | yes | yes | no | no | Library/report proof point for non-sequence DP. |
 
 See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
 

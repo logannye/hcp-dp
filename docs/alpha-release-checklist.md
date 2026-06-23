@@ -19,6 +19,7 @@ python3 scripts/validate_external.py
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128 --max-size 128 --skip-external --sample-output docs/sample-report.md
 cargo run --bin scale_probe -- --mode edit-distance-deep --engine hcp --max-size 128 --format json
+cargo run --bin scale_probe -- --scenario dtw --max-size 128 --verify-limit 128 --format json
 ```
 
 ## Required GitHub Gates
@@ -61,6 +62,8 @@ and uploads the same correctness/performance report artifact.
 - `edit-distance --engine auto` is tested and reports the selected backend.
 - Edit-distance deep reports compare HCP, full-table, linear-space, and optional
   Edlib engines, plus adaptive-banded traceback and Myers score baselines.
+- Dynamic time warping is available as a library/report proof point for
+  non-sequence DP generality and passes the same contract harness.
 - `docs/sample-report.md` is generated from a small bounded run and clearly
   labeled as an example artifact, not a benchmark claim.
 - Windows CI sets `SCALE_PROBE_MAX_SIZE=512` to keep smoke runtime comfortably

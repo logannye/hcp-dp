@@ -20,8 +20,8 @@ Status counts: `{"not_checked": 2, "passed": 18}`
 
 | Scenario | Size | Wall s | RSS delta bytes | Peak RSS bytes | Status | Detail |
 |---|---:|---:|---:|---:|---|---|
-| edit_distance | 64 | 0.000863 | 3751936 | 11239424 | passed | distance=32 |
-| edit_distance | 128 | 0.002084 | 114688 | 11370496 | passed | distance=64 |
+| edit_distance | 64 | 0.000992 | 4554752 | 11960320 | passed | distance=32 |
+| edit_distance | 128 | 0.004723 | 720896 | 12730368 | passed | distance=64 |
 
 ## Edit Distance Deep Comparison
 
@@ -32,24 +32,24 @@ This section compares exact HCP edit-distance traceback engines and exact adapti
 
 | Case | Engine | Query | Target | Wall s | Peak RSS bytes | Distance | Expected | Path score | Path len | Summary ms | Reconstruct ms | Verify ms | Status | Detail |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| small_regression | hcp | 6 | 7 | 0.000095 | 11206656 | 3 | 3 | 3 | 8 | 0.020 | 0.037 | 0.002 | passed | distance=3, path_len=8 |
-| small_regression | hcp-linear | 6 | 7 | 0.000030 | 11255808 | 3 | 3 | 3 | 8 | 0.009 | 0.017 | 0.001 | passed | distance=3, block_size=1, path_len=8 |
-| small_regression | adaptive-banded-path | 6 | 7 | 0.000031 | 11386880 | 3 | 3 | 3 | 8 | 0.000 | 0.028 | 0.001 | passed | distance=3, band=3, path_len=8 |
-| small_regression | full-table | 6 | 7 | 0.000012 | 11419648 | 3 | 3 |  |  |  |  |  | passed | full_table_distance=3 |
-| small_regression | linear-space | 6 | 7 | 0.000008 | 11436032 | 3 | 3 |  |  |  |  |  | passed | linear_space_distance=3 |
-| small_regression | adaptive-banded | 6 | 7 | 0.000011 | 11436032 | 3 | 3 |  |  |  |  |  | passed | adaptive_banded_distance=3 |
-| small_regression | myers | 6 | 7 | 0.000004 | 11501568 | 3 | 3 |  |  |  |  |  | passed | myers_distance=3 |
-| small_regression | myers-u64 | 6 | 7 | 0.000011 | 11534336 | 3 | 3 |  |  |  |  |  | passed | myers_u64_distance=3 |
-| small_regression | edlib | 6 | 7 | 0.059652 | 12156928 |  | 3 |  |  |  |  |  | not_checked | edlib unavailable or failed |
-| short_myers_window | hcp | 64 | 64 | 0.000374 | 12435456 | 32 | 32 | 32 | 65 | 0.119 | 0.244 | 0.003 | passed | distance=32, path_len=65 |
-| short_myers_window | hcp-linear | 64 | 64 | 0.000484 | 12500992 | 32 | 32 | 32 | 65 | 0.123 | 0.355 | 0.003 | passed | distance=32, block_size=1, path_len=65 |
-| short_myers_window | adaptive-banded-path | 64 | 64 | 0.000606 | 12533760 | 32 | 32 | 32 | 65 | 0.000 | 0.602 | 0.002 | passed | distance=32, band=63, path_len=65 |
-| short_myers_window | full-table | 64 | 64 | 0.000140 | 12582912 | 32 | 32 |  |  |  |  |  | passed | full_table_distance=32 |
-| short_myers_window | linear-space | 64 | 64 | 0.000122 | 12582912 | 32 | 32 |  |  |  |  |  | passed | linear_space_distance=32 |
-| short_myers_window | adaptive-banded | 64 | 64 | 0.000530 | 12582912 | 32 | 32 |  |  |  |  |  | passed | adaptive_banded_distance=32 |
-| short_myers_window | myers | 64 | 64 | 0.000007 | 12550144 | 32 | 32 |  |  |  |  |  | passed | myers_distance=32 |
-| short_myers_window | myers-u64 | 64 | 64 | 0.000006 | 12566528 | 32 | 32 |  |  |  |  |  | passed | myers_u64_distance=32 |
-| short_myers_window | edlib | 64 | 64 | 0.046921 | 12615680 |  | 32 |  |  |  |  |  | not_checked | edlib unavailable or failed |
+| small_regression | hcp | 6 | 7 | 0.000144 | 11354112 | 3 | 3 | 3 | 8 | 0.031 | 0.053 | 0.003 | passed | distance=3, path_len=8 |
+| small_regression | hcp-linear | 6 | 7 | 0.000051 | 11468800 | 3 | 3 | 3 | 8 | 0.015 | 0.030 | 0.001 | passed | distance=3, block_size=1, path_len=8 |
+| small_regression | adaptive-banded-path | 6 | 7 | 0.000023 | 11468800 | 3 | 3 | 3 | 8 | 0.000 | 0.018 | 0.002 | passed | distance=3, band=3, path_len=8 |
+| small_regression | full-table | 6 | 7 | 0.000013 | 11534336 | 3 | 3 |  |  |  |  |  | passed | full_table_distance=3 |
+| small_regression | linear-space | 6 | 7 | 0.000023 | 11534336 | 3 | 3 |  |  |  |  |  | passed | linear_space_distance=3 |
+| small_regression | adaptive-banded | 6 | 7 | 0.000040 | 11567104 | 3 | 3 |  |  |  |  |  | passed | adaptive_banded_distance=3 |
+| small_regression | myers | 6 | 7 | 0.000007 | 11583488 | 3 | 3 |  |  |  |  |  | passed | myers_distance=3 |
+| small_regression | myers-u64 | 6 | 7 | 0.000007 | 11599872 | 3 | 3 |  |  |  |  |  | passed | myers_u64_distance=3 |
+| small_regression | edlib | 6 | 7 | 0.102083 | 12484608 |  | 3 |  |  |  |  |  | not_checked | edlib unavailable or failed |
+| short_myers_window | hcp | 64 | 64 | 0.000659 | 13107200 | 32 | 32 | 32 | 65 | 0.207 | 0.440 | 0.004 | passed | distance=32, path_len=65 |
+| short_myers_window | hcp-linear | 64 | 64 | 0.001625 | 13254656 | 32 | 32 | 32 | 65 | 0.367 | 1.031 | 0.006 | passed | distance=32, block_size=1, path_len=65 |
+| short_myers_window | adaptive-banded-path | 64 | 64 | 0.000915 | 13271040 | 32 | 32 | 32 | 65 | 0.000 | 0.900 | 0.006 | passed | distance=32, band=63, path_len=65 |
+| short_myers_window | full-table | 64 | 64 | 0.005029 | 13336576 | 32 | 32 |  |  |  |  |  | passed | full_table_distance=32 |
+| short_myers_window | linear-space | 64 | 64 | 0.000194 | 13975552 | 32 | 32 |  |  |  |  |  | passed | linear_space_distance=32 |
+| short_myers_window | adaptive-banded | 64 | 64 | 0.001361 | 14041088 | 32 | 32 |  |  |  |  |  | passed | adaptive_banded_distance=32 |
+| short_myers_window | myers | 64 | 64 | 0.000013 | 14041088 | 32 | 32 |  |  |  |  |  | passed | myers_distance=32 |
+| short_myers_window | myers-u64 | 64 | 64 | 0.000008 | 14041088 | 32 | 32 |  |  |  |  |  | passed | myers_u64_distance=32 |
+| short_myers_window | edlib | 64 | 64 | 0.074178 | 14123008 |  | 32 |  |  |  |  |  | not_checked | edlib unavailable or failed |
 
 ## External Validation
 

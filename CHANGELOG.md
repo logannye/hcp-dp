@@ -12,8 +12,9 @@ the alpha release when they improve correctness or clarity.
 - Added default `hcp-align edit-distance --engine auto` selection, which tries a
   bounded exact banded traceback before falling back to HCP linear-space
   traceback.
-- Added `hcp-linear`, adaptive-banded, Myers, full-table, and linear-space
-  edit-distance comparison modes to `scale_probe --mode edit-distance-deep`.
+- Added `hcp-linear`, adaptive-banded, arbitrary-length Myers, full-table, and
+  linear-space edit-distance comparison modes to
+  `scale_probe --mode edit-distance-deep`.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

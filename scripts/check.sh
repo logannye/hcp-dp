@@ -230,6 +230,7 @@ cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- "${SCALE_
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine hcp --max-size 128 --format json >/dev/null
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine adaptive-banded --max-size 2048 --format json >/dev/null
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine adaptive-banded-path --max-size 2048 --format json >/dev/null
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine myers --max-size 2048 --format json >/dev/null
 
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Benches (dev mode, faster)"

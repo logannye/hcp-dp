@@ -159,6 +159,7 @@ first proof point:
 | `hcp` | yes | generic summary-tree traceback | quadratic score work, sub-table memory |
 | `hcp-linear` | yes | minimal retained checkpoint state | quadratic score work, linear retained state |
 | `adaptive-banded` | yes | low edit distance `s` | roughly `O(n*s)`, worst-case quadratic |
+| `myers` | no | score-only edit distance | `O(ceil(n/64) * m)` bit-vector scoring |
 | `myers-u64` | no | patterns up to 64 symbols | bit-parallel exact distance |
 
 In the generated local report, a 2048 bp near-match case with four edits ran in
@@ -295,6 +296,7 @@ Use `HcpEngine::linear_space(problem)` when retained memory is the priority.
 | Edit distance, auto backend | yes | yes | yes | Edlib optional | Default; selects adaptive-banded traceback or HCP fallback. |
 | Edit distance, HCP traceback | yes | yes | yes | Edlib optional | Generic exact traceback engine. |
 | Edit distance, adaptive banded | yes | yes | yes | Edlib optional | Fastest when final edit distance is small. |
+| Edit distance, Myers bit-vector | yes | no | report tool only | checked internally | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | report tool only | checked internally | Pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | no external anchor yet | Full query against any target interval. |
 

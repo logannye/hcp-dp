@@ -12,7 +12,7 @@ use std::{
 use hcp_dp::{
     problems::{
         edit_distance::{
-            distance_adaptive_banded, distance_linear_space, distance_myers_u64,
+            distance_adaptive_banded, distance_linear_space, distance_myers, distance_myers_u64,
             trace_adaptive_banded, EditDistanceProblem,
         },
         lcs::LcsProblem,
@@ -213,7 +213,7 @@ Options:
   --max-size <N>             Skip scenario sizes larger than N
   --mode <standard|edit-distance-deep>
                              Probe mode (default: standard)
-  --engine <hcp|hcp-linear|adaptive-banded-path|full-table|linear-space|adaptive-banded|myers-u64|edlib>
+  --engine <hcp|hcp-linear|adaptive-banded-path|full-table|linear-space|adaptive-banded|myers|myers-u64|edlib>
                              Engine filter for --mode edit-distance-deep
   -h, --help                 Print this help
 "
@@ -252,6 +252,7 @@ enum DeepEngine {
     FullTable,
     LinearSpace,
     AdaptiveBanded,
+    Myers,
     MyersU64,
     Edlib,
 }
@@ -265,6 +266,7 @@ impl DeepEngine {
             "full-table" => Ok(Self::FullTable),
             "hirschberg" | "linear-space" => Ok(Self::LinearSpace),
             "adaptive-banded" => Ok(Self::AdaptiveBanded),
+            "myers" | "myers-bitvector" => Ok(Self::Myers),
             "myers-u64" => Ok(Self::MyersU64),
             "edlib" => Ok(Self::Edlib),
             other => Err(format!("unknown engine '{other}'")),
@@ -279,6 +281,7 @@ impl DeepEngine {
             Self::FullTable => "full-table",
             Self::LinearSpace => "linear-space",
             Self::AdaptiveBanded => "adaptive-banded",
+            Self::Myers => "myers",
             Self::MyersU64 => "myers-u64",
             Self::Edlib => "edlib",
         }
@@ -636,6 +639,7 @@ fn deep_engines(filter: Option<DeepEngine>) -> Vec<DeepEngine> {
             DeepEngine::FullTable,
             DeepEngine::LinearSpace,
             DeepEngine::AdaptiveBanded,
+            DeepEngine::Myers,
             DeepEngine::MyersU64,
             DeepEngine::Edlib,
         ],
@@ -853,6 +857,10 @@ fn run_edit_distance_engine(
         DeepEngine::AdaptiveBanded => {
             let distance = distance_adaptive_banded(&case.query, &case.target);
             edit_distance_baseline_outcome("adaptive_banded", distance, expected)
+        }
+        DeepEngine::Myers => {
+            let distance = distance_myers(&case.query, &case.target);
+            edit_distance_baseline_outcome("myers", distance, expected)
         }
         DeepEngine::MyersU64 => match distance_myers_u64(&case.query, &case.target) {
             Some(distance) => edit_distance_baseline_outcome("myers_u64", distance, expected),

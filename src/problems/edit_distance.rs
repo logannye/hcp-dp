@@ -506,6 +506,97 @@ pub fn trace_adaptive_banded(x: &[u8], y: &[u8]) -> EditDistanceTrace {
     }
 }
 
+/// Exact Myers bit-vector Levenshtein distance for arbitrary pattern lengths.
+///
+/// This is a distance-only backend. It computes the exact edit distance in
+/// `O(ceil(pattern.len() / 64) * text.len())` word operations and stores no
+/// traceback path. Use [`EditDistanceProblem`] with [`crate::HcpEngine`] when
+/// an exact reconstructed path is required.
+pub fn distance_myers(pattern: &[u8], text: &[u8]) -> u32 {
+    const WORD_BITS: usize = u64::BITS as usize;
+
+    let m = pattern.len();
+    if m == 0 {
+        return text.len() as u32;
+    }
+    if m <= WORD_BITS {
+        return distance_myers_u64(pattern, text).expect("short pattern must fit in one word");
+    }
+
+    let word_count = m.div_ceil(WORD_BITS);
+    let last_word = word_count - 1;
+    let last_bits = m % WORD_BITS;
+    let last_mask = if last_bits == 0 {
+        u64::MAX
+    } else {
+        (1u64 << last_bits) - 1
+    };
+    let high_bit = 1u64 << ((m - 1) % u64::BITS as usize);
+
+    let mut peq = vec![[0u64; 256]; word_count];
+    for (idx, &byte) in pattern.iter().enumerate() {
+        peq[idx / WORD_BITS][byte as usize] |= 1u64 << (idx % WORD_BITS);
+    }
+
+    let mut vp = vec![u64::MAX; word_count];
+    vp[last_word] = last_mask;
+    let mut vn = vec![0u64; word_count];
+    let mut d0 = vec![0u64; word_count];
+    let mut hp = vec![0u64; word_count];
+    let mut hn = vec![0u64; word_count];
+    let mut next_vp = vec![0u64; word_count];
+    let mut next_vn = vec![0u64; word_count];
+    let mut score = m as u32;
+
+    for &byte in text {
+        let mut carry = 0u128;
+        for word in 0..word_count {
+            let mask = if word == last_word {
+                last_mask
+            } else {
+                u64::MAX
+            };
+            let eq = peq[word][byte as usize];
+            let x = eq | vn[word];
+            let sum = ((x & vp[word]) as u128) + (vp[word] as u128) + carry;
+            carry = sum >> u64::BITS;
+
+            let d = (((sum as u64) ^ vp[word]) | x) & mask;
+            d0[word] = d;
+            hp[word] = (vn[word] | !(d | vp[word])) & mask;
+            hn[word] = (vp[word] & d) & mask;
+        }
+
+        if hp[last_word] & high_bit != 0 {
+            score += 1;
+        } else if hn[last_word] & high_bit != 0 {
+            score -= 1;
+        }
+
+        let mut hp_shift_in = 1u64;
+        let mut hn_shift_in = 0u64;
+        for word in 0..word_count {
+            let mask = if word == last_word {
+                last_mask
+            } else {
+                u64::MAX
+            };
+            let shifted_hp = ((hp[word] << 1) | hp_shift_in) & mask;
+            hp_shift_in = hp[word] >> (u64::BITS - 1);
+            let shifted_hn = ((hn[word] << 1) | hn_shift_in) & mask;
+            hn_shift_in = hn[word] >> (u64::BITS - 1);
+
+            next_vp[word] = (shifted_hn | !(d0[word] | shifted_hp)) & mask;
+            next_vn[word] = shifted_hp & d0[word];
+        }
+
+        std::mem::swap(&mut vp, &mut next_vp);
+        std::mem::swap(&mut vn, &mut next_vn);
+    }
+
+    score
+}
+
 /// Exact Myers single-word bit-vector Levenshtein distance.
 ///
 /// This is a fast exact distance-only backend for patterns up to 64 symbols.
@@ -718,5 +809,97 @@ mod tests {
     fn myers_u64_declines_long_patterns() {
         let pattern = vec![b'A'; 65];
         assert_eq!(distance_myers_u64(&pattern, b"A"), None);
+    }
+
+    #[test]
+    fn myers_arbitrary_matches_u64_for_short_patterns() {
+        let cases: &[(&[u8], &[u8])] = &[
+            (b"", b"ABC"),
+            (b"A", b""),
+            (b"kitten", b"sitting"),
+            (b"GATTACA", b"GCATGCU"),
+            (
+                b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                b"AAAAAAAATAAAAAAAAAAAAAAATAAAAAAAAAAAAAAATAAAAAAAAAAAAAAATAAAA",
+            ),
+        ];
+
+        for (pattern, text) in cases {
+            assert_eq!(
+                distance_myers(pattern, text),
+                distance_myers_u64(pattern, text).unwrap(),
+                "arbitrary Myers mismatch for {:?} vs {:?}",
+                std::str::from_utf8(pattern).unwrap_or("<bytes>"),
+                std::str::from_utf8(text).unwrap_or("<bytes>")
+            );
+        }
+    }
+
+    #[test]
+    fn myers_arbitrary_matches_linear_space_for_long_patterns() {
+        let cases: Vec<(Vec<u8>, Vec<u8>)> = vec![
+            (patterned(65, 0), patterned(65, 1)),
+            (patterned(127, 0), patterned(127, 2)),
+            (patterned(128, 0), patterned(128, 3)),
+            (patterned(129, 0), patterned(129, 1)),
+            (patterned(191, 0), patterned(257, 2)),
+            (vec![b'A'; 256], vec![b'T'; 256]),
+            (
+                [patterned(64, 0), vec![b'A'; 128], patterned(64, 1)].concat(),
+                [patterned(64, 0), vec![b'A'; 64], patterned(64, 1)].concat(),
+            ),
+        ];
+
+        for (pattern, text) in cases {
+            assert_eq!(
+                distance_myers(&pattern, &text),
+                distance_linear_space(&pattern, &text),
+                "arbitrary Myers mismatch for lengths {} and {}",
+                pattern.len(),
+                text.len()
+            );
+        }
+    }
+
+    #[test]
+    fn myers_arbitrary_matches_linear_space_for_exhaustive_small_binary_strings() {
+        let strings = binary_strings(5);
+        for pattern in &strings {
+            for text in &strings {
+                assert_eq!(
+                    distance_myers(pattern, text),
+                    distance_linear_space(pattern, text),
+                    "arbitrary Myers mismatch for {:?} vs {:?}",
+                    std::str::from_utf8(pattern).unwrap_or("<bytes>"),
+                    std::str::from_utf8(text).unwrap_or("<bytes>")
+                );
+            }
+        }
+    }
+
+    fn patterned(len: usize, offset: usize) -> Vec<u8> {
+        const ALPHABET: &[u8] = b"ACGT";
+        (0..len)
+            .map(|idx| ALPHABET[(idx.wrapping_mul(7) + offset) % ALPHABET.len()])
+            .collect()
+    }
+
+    fn binary_strings(max_len: usize) -> Vec<Vec<u8>> {
+        let mut strings = Vec::new();
+        for len in 0..=max_len {
+            for bits in 0..(1usize << len) {
+                let mut s = Vec::with_capacity(len);
+                for idx in 0..len {
+                    let byte = if bits & (1usize << idx) == 0 {
+                        b'A'
+                    } else {
+                        b'C'
+                    };
+                    s.push(byte);
+                }
+                strings.push(s);
+            }
+        }
+        strings
     }
 }

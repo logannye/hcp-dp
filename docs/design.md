@@ -122,22 +122,22 @@ make the summary/frontier implementation specialized where the problem allows it
 
 - adaptive-banded edit distance: exact `O(n*s)`-style behavior when final edit
   distance `s` is small,
-- Myers bit-vector edit distance: exact distance for short patterns using word
-  parallelism,
+- Myers bit-vector edit distance: exact score-only distance using word
+  parallelism across arbitrary pattern lengths,
 - future wavefront affine alignment: exact gap-affine alignment in
   score-sensitive regimes,
 - future sparse/layered DAG and Viterbi frontiers: avoid dense state tables when
   transitions are sparse.
 
 The current code includes exact adaptive-banded edit-distance traceback and
-single-word Myers exact distance scoring. The default HCP engines demonstrate
-the reusable summary contract; the adaptive-banded traceback engine demonstrates
-how specialized frontier algorithms can be made path-producing instead of
-score-only. The edit-distance CLI's `auto` backend policy tries a bounded exact
-banded traceback first and falls back to HCP linear-space traceback when the
-optimum is outside that band. This split is deliberate: reports can show where
-specialized frontier algorithms win today while preserving the exact-path
-contract as the architecture to extend.
+arbitrary-length Myers exact distance scoring. The default HCP engines
+demonstrate the reusable summary contract; the adaptive-banded traceback engine
+demonstrates how specialized frontier algorithms can be made path-producing
+instead of score-only. The edit-distance CLI's `auto` backend policy tries a
+bounded exact banded traceback first and falls back to HCP linear-space
+traceback when the optimum is outside that band. This split is deliberate:
+reports can show where specialized frontier algorithms win today while
+preserving the exact-path contract as the architecture to extend.
 
 ## Current Proof Points
 
@@ -148,7 +148,7 @@ contract as the architecture to extend.
 - Levenshtein edit distance
 - semi-global linear-gap alignment
 - adaptive-banded exact edit-distance traceback
-- single-word Myers exact edit-distance scoring for patterns up to 64 symbols
+- Myers exact edit-distance scoring for arbitrary pattern lengths
 
 Each exported problem is expected to pass contract tests for summary replay,
 summary merge, split feasibility, path joining, independent path scoring, and

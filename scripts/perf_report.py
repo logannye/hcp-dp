@@ -193,7 +193,7 @@ def write_report(
             "This section compares exact HCP edit-distance traceback engines and exact adaptive-banded traceback against dense, rolling-row, Myers bit-vector, and optional Edlib score baselines on fixed scenario families.",
             "",
             "- `hcp`, `hcp-linear`, and `adaptive-banded-path` return exact reconstructed paths and independently scored path distances.",
-            "- `adaptive-banded`, `myers-u64`, `linear-space`, `full-table`, and `edlib` are exact distance-only engines used to expose speed/memory regimes.",
+            "- `adaptive-banded`, `myers`, `myers-u64`, `linear-space`, `full-table`, and `edlib` are exact distance-only engines used to expose speed/memory regimes.",
             "",
             "| Case | Engine | Query | Target | Wall s | Peak RSS bytes | Distance | Expected | Path score | Path len | Summary ms | Reconstruct ms | Verify ms | Status | Detail |",
             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",

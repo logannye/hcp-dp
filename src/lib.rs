@@ -17,9 +17,9 @@
 //!
 //! The edit-distance module also exposes specialized exact engines: rolling-row
 //! linear-space scoring, adaptive-banded traceback for low-edit regimes, and a
-//! single-word Myers bit-vector score backend for patterns up to 64 symbols.
-//! Those are used in report tooling to make the generic HCP traceback engine's
-//! tradeoffs visible against specialized frontier algorithms.
+//! Myers bit-vector score backend for arbitrary pattern lengths. Those are used
+//! in report tooling to make the generic HCP traceback engine's tradeoffs
+//! visible against specialized frontier algorithms.
 //!
 //! See the repository README and `docs/design.md` for the technical overview.
 

@@ -83,6 +83,7 @@ struct Options {
     format: OutputFormat,
     verify_limit: usize,
     scenario: Option<String>,
+    max_size: Option<usize>,
 }
 
 impl Options {
@@ -94,6 +95,7 @@ impl Options {
         let mut format = OutputFormat::Csv;
         let mut verify_limit = 512;
         let mut scenario = None;
+        let mut max_size = None;
 
         while let Some(arg) = args.next() {
             let arg = arg.into();
@@ -124,6 +126,14 @@ impl Options {
                 );
             } else if let Some(value) = arg.strip_prefix("--scenario=") {
                 scenario = Some(value.to_string());
+            } else if arg == "--max-size" {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "missing value after --max-size".to_string())?
+                    .into();
+                max_size = Some(parse_limit(&value)?);
+            } else if let Some(value) = arg.strip_prefix("--max-size=") {
+                max_size = Some(parse_limit(value)?);
             } else {
                 return Err(format!("unrecognized argument '{arg}'"));
             }
@@ -133,6 +143,7 @@ impl Options {
             format,
             verify_limit,
             scenario,
+            max_size,
         })
     }
 
@@ -140,6 +151,14 @@ impl Options {
         self.scenario
             .as_deref()
             .is_none_or(|filter| filter == scenario)
+    }
+
+    fn sizes<'a>(&self, sizes: &'a [usize]) -> impl Iterator<Item = usize> + 'a {
+        let max_size = self.max_size;
+        sizes
+            .iter()
+            .copied()
+            .filter(move |size| max_size.is_none_or(|limit| *size <= limit))
     }
 
     fn print_help() {
@@ -153,6 +172,7 @@ Options:
   --scenario <name>          Run only one scenario: lcs, needleman_wunsch,
                              smith_waterman, needleman_wunsch_affine,
                              edit_distance, semiglobal
+  --max-size <N>             Skip scenario sizes larger than N
   -h, --help                 Print this help
 "
         );
@@ -222,9 +242,9 @@ impl VerificationStatus {
 
 fn run_lcs(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048, 4096];
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("lcs", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len, 1);
@@ -265,9 +285,9 @@ fn run_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const MATCH_SCORE: i32 = 2;
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_PENALTY: i32 = -2;
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("needleman_wunsch", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len, 2);
@@ -309,9 +329,9 @@ fn run_smith_waterman(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const MATCH_SCORE: i32 = 2;
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_PENALTY: i32 = -2;
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("smith_waterman", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len, 1);
@@ -355,9 +375,9 @@ fn run_affine_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_OPEN: i32 = -3;
     const GAP_EXTEND: i32 = -1;
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("needleman_wunsch_affine", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len, 3);
@@ -409,9 +429,9 @@ fn run_affine_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
 
 fn run_edit_distance(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048, 4096];
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("edit_distance", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len, 1);
@@ -454,9 +474,9 @@ fn run_semiglobal(options: &Options, sys: &mut System) -> Vec<Measurement> {
     const MATCH_SCORE: i32 = 2;
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_PENALTY: i32 = -2;
-    SIZES
-        .iter()
-        .map(|&len| {
+    options
+        .sizes(SIZES)
+        .map(|len| {
             measure("semiglobal", len, sys, || {
                 let s = deterministic_dna(len);
                 let t = deterministic_dna_offset(len + len / 4, 2);

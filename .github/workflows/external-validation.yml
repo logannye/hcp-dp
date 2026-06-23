@@ -8,9 +8,9 @@ jobs:
     name: External validation and report
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install external validators
@@ -20,7 +20,7 @@ jobs:
       - name: Generate correctness and performance report
         run: python scripts/perf_report.py --external-required --verify-limit 512
       - name: Upload report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hcp-dp-release-report
           path: target/hcp-dp-report/

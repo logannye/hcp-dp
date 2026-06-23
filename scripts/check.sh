@@ -15,6 +15,11 @@ else
   say "Enabling features: (default)"
 fi
 
+SCALE_PROBE_MAX_SIZE="${SCALE_PROBE_MAX_SIZE:-}"
+if [[ -z "${SCALE_PROBE_MAX_SIZE}" && "${RUNNER_OS:-}" == "Windows" ]]; then
+  SCALE_PROBE_MAX_SIZE=1024
+fi
+
 # Repo root
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR%/scripts}"
@@ -199,7 +204,11 @@ CLI_PATH_ONLY=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-
 assert_eq "$(printf '%s' "$CLI_PATH_ONLY" | json_field verification_status)" "path_only" "CLI verify-limit path-only status"
 
 say "Run scale probe smoke"
-cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --format table --verify-limit 128 >/dev/null
+SCALE_PROBE_ARGS=(--format table --verify-limit 128)
+if [[ -n "${SCALE_PROBE_MAX_SIZE}" ]]; then
+  SCALE_PROBE_ARGS+=(--max-size "${SCALE_PROBE_MAX_SIZE}")
+fi
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- "${SCALE_PROBE_ARGS[@]}" >/dev/null
 
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Benches (dev mode, faster)"

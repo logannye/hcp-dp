@@ -14,7 +14,7 @@ jobs:
   perf:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run benches with baseline comparison
         env:
@@ -22,4 +22,3 @@ jobs:
           PERF_ENFORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enforce || '0' }}
         run: |
           bash scripts/check.sh
-

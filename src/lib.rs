@@ -10,8 +10,6 @@ pub mod blocks;
 pub mod builder;
 pub mod engine;
 pub mod problems;
-#[doc(hidden)]
-pub mod sequence_io;
 pub mod traits;
 pub mod utils;
 

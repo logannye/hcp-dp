@@ -10,10 +10,14 @@ use hcp_dp::{
         semiglobal::{SemiGlobalCell, SemiGlobalProblem},
         smith_waterman::{SmithWatermanProblem, SwCell},
     },
-    sequence_io::{read_sequence_records, SequenceRecord},
     HcpEngine, HcpProblem,
 };
 use serde::Serialize;
+
+#[path = "../sequence_io.rs"]
+mod sequence_io;
+
+use sequence_io::{read_sequence_records, SequenceRecord};
 
 fn main() -> ExitCode {
     match run() {

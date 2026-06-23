@@ -189,6 +189,7 @@ Full CLI reference: [docs/cli.md](docs/cli.md).
 | Feature compile checks | `cargo test --features tracing --lib --tests` and `cargo test --features parallel --lib --tests` |
 | Scaling smoke probe | `cargo run --bin scale_probe -- --format table` |
 | One probe scenario | `cargo run --bin scale_probe -- --scenario semiglobal --format json` |
+| Bounded probe sizes | `cargo run --bin scale_probe -- --max-size 1024 --format table` |
 | Optional external validation | `python3 scripts/validate_external.py` |
 | Local report | `python3 scripts/perf_report.py` |
 | Optional benchmarks | `RUN_BENCH=1 bash scripts/check.sh` |

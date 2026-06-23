@@ -10,7 +10,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use hcp_dp::{
     alignment::{AlignmentOpKind, AlignmentTrace},
     problems::{
-        edit_distance::{trace_adaptive_banded, trace_banded, EditDistanceProblem},
+        edit_distance::{
+            distance_adaptive_banded, distance_myers, trace_adaptive_banded, trace_banded,
+            EditDistanceProblem,
+        },
         nw_affine::{NwAffineProblem, NwAffineState},
         nw_align::NwProblem,
         semiglobal::{SemiGlobalCell, SemiGlobalProblem},
@@ -150,6 +153,9 @@ struct EditDistanceCommand {
     /// Exact traceback engine to use.
     #[arg(long, value_enum, default_value_t = EditDistanceEngine::Auto)]
     engine: EditDistanceEngine,
+    /// Compute only the exact edit distance, without traceback or CIGAR output.
+    #[arg(long)]
+    score_only: bool,
 }
 
 #[derive(Args)]
@@ -246,7 +252,7 @@ enum OperationDetail {
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum EditDistanceEngine {
-    /// Deterministically choose a path-producing backend.
+    /// Deterministically choose an exact backend.
     Auto,
     /// Generic HCP summary-tree traceback with square-root checkpointing.
     Hcp,
@@ -254,6 +260,8 @@ enum EditDistanceEngine {
     HcpLinear,
     /// Exact adaptive-banded traceback for low-edit-distance inputs.
     AdaptiveBanded,
+    /// Exact Myers bit-vector distance without traceback.
+    Myers,
 }
 
 impl EditDistanceEngine {
@@ -263,6 +271,7 @@ impl EditDistanceEngine {
             Self::Hcp => "hcp",
             Self::HcpLinear => "hcp-linear",
             Self::AdaptiveBanded => "adaptive-banded",
+            Self::Myers => "myers",
         }
     }
 }
@@ -286,6 +295,7 @@ struct PairInput {
 enum VerificationStatus {
     Full,
     PathOnly,
+    ScoreOnly,
     Failed,
 }
 
@@ -294,6 +304,7 @@ impl VerificationStatus {
         match self {
             Self::Full => "full",
             Self::PathOnly => "path_only",
+            Self::ScoreOnly => "score_only",
             Self::Failed => "failed",
         }
     }
@@ -413,7 +424,7 @@ fn run_affine_mode(args: AffineCommand) -> Result<Vec<Report>, String> {
 fn run_edit_distance_mode(args: EditDistanceCommand) -> Result<Vec<Report>, String> {
     let pairs = read_pairs(&args.input)?;
     run_pairs(&pairs, &args.output, "edit-distance", |pair| {
-        align_edit_distance(pair, &args.output, args.block, args.engine)
+        align_edit_distance(pair, &args.output, args.block, args.engine, args.score_only)
     })
 }
 
@@ -676,7 +687,11 @@ fn align_edit_distance(
     output: &OutputArgs,
     block: BlockArgs,
     engine: EditDistanceEngine,
+    score_only: bool,
 ) -> Result<Report, String> {
+    if score_only {
+        return score_only_edit_distance(pair, output, block, engine);
+    }
     let start = Instant::now();
     let problem = EditDistanceProblem::new(&pair.query.sequence, &pair.target.sequence);
     let (distance, path, stats, block_size, backend) = match engine {
@@ -755,6 +770,12 @@ fn align_edit_distance(
                 Some(EditDistanceEngine::AdaptiveBanded.backend_label()),
             )
         }
+        EditDistanceEngine::Myers => {
+            return Err(
+                "--engine myers is score-only; add --score-only or choose a traceback engine"
+                    .to_string(),
+            );
+        }
     };
     let verify_start = Instant::now();
     let mut verification = verify_u32(output, pair, problem.score_path(&path), distance, || {
@@ -782,6 +803,75 @@ fn align_edit_distance(
             backend,
         },
     ))
+}
+
+fn score_only_edit_distance(
+    pair: &PairInput,
+    output: &OutputArgs,
+    block: BlockArgs,
+    engine: EditDistanceEngine,
+) -> Result<Report, String> {
+    if block.block_size.is_some() {
+        return Err("--block-size applies only to traceback-producing HCP engines".to_string());
+    }
+    if output.show_alignment {
+        return Err("--score-only cannot be combined with --show-alignment".to_string());
+    }
+
+    let start = Instant::now();
+    let (distance, backend) = match engine {
+        EditDistanceEngine::Auto | EditDistanceEngine::Myers => (
+            distance_myers(&pair.query.sequence, &pair.target.sequence),
+            EditDistanceEngine::Myers.backend_label(),
+        ),
+        EditDistanceEngine::AdaptiveBanded => (
+            distance_adaptive_banded(&pair.query.sequence, &pair.target.sequence),
+            EditDistanceEngine::AdaptiveBanded.backend_label(),
+        ),
+        EditDistanceEngine::Hcp | EditDistanceEngine::HcpLinear => {
+            return Err(
+                "--score-only supports --engine auto, --engine myers, or --engine adaptive-banded"
+                    .to_string(),
+            );
+        }
+    };
+
+    let verify_start = Instant::now();
+    let mut verification = verify_score_only_u32(output, pair, distance, || {
+        EditDistanceProblem::new(&pair.query.sequence, &pair.target.sequence).full_table_distance()
+    });
+    verification.verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+
+    Ok(Report {
+        schema_version: SCHEMA_VERSION,
+        engine: ENGINE_NAME,
+        pair_index: pair.pair_index,
+        query_id: pair.query.id.clone(),
+        target_id: pair.target.id.clone(),
+        mode: "edit-distance",
+        score: None,
+        distance: Some(distance),
+        path_score: None,
+        verification_status: verification.status,
+        verified: verification.verified,
+        query_start: 0,
+        query_end: pair.query.sequence.len(),
+        target_start: 0,
+        target_end: pair.target.sequence.len(),
+        cigar: String::new(),
+        backend: Some(backend),
+        operation_counts: None,
+        operations: None,
+        block_size: 0,
+        path_length: 0,
+        summary_build_ms: 0.0,
+        reconstruction_ms: 0.0,
+        verification_ms: verification.verification_ms,
+        aligned_query: None,
+        aligned_target: None,
+        error: None,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
 }
 
 fn auto_edit_band_limit(query_len: usize, target_len: usize) -> usize {
@@ -1015,6 +1105,37 @@ where
         VerificationResult {
             path_score: path_score_i64,
             status: VerificationStatus::PathOnly,
+            verified: None,
+            verification_ms: 0.0,
+        }
+    }
+}
+
+fn verify_score_only_u32<F>(
+    output: &OutputArgs,
+    pair: &PairInput,
+    reported: u32,
+    baseline: F,
+) -> VerificationResult
+where
+    F: FnOnce() -> u32,
+{
+    if full_verify_requested(output, pair) {
+        let passed = baseline() == reported;
+        VerificationResult {
+            path_score: None,
+            status: if passed {
+                VerificationStatus::Full
+            } else {
+                VerificationStatus::Failed
+            },
+            verified: Some(passed),
+            verification_ms: 0.0,
+        }
+    } else {
+        VerificationResult {
+            path_score: None,
+            status: VerificationStatus::ScoreOnly,
             verified: None,
             verification_ms: 0.0,
         }

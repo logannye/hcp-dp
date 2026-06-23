@@ -46,7 +46,7 @@
     "score": { "type": ["integer", "null"] },
     "distance": { "type": ["integer", "null"], "minimum": 0 },
     "path_score": { "type": ["integer", "null"] },
-    "verification_status": { "enum": ["full", "path_only", "failed"] },
+    "verification_status": { "enum": ["full", "path_only", "score_only", "failed"] },
     "verified": { "type": ["boolean", "null"] },
     "query_start": { "type": "integer", "minimum": 0 },
     "query_end": { "type": "integer", "minimum": 0 },
@@ -55,7 +55,7 @@
     "cigar": { "type": "string" },
     "backend": {
       "description": "Optional problem-specific backend label. Omitted for the default HCP engine.",
-      "enum": ["hcp-linear", "adaptive-banded"]
+      "enum": ["hcp-linear", "adaptive-banded", "myers"]
     },
     "operation_counts": {
       "type": "array",

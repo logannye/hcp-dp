@@ -74,7 +74,7 @@ Per-pair structured output includes:
 - `mode`
 - `score` or `distance`
 - optional `backend` for non-default per-problem engines
-- `path_score`
+- `path_score` when traceback is produced; `null` for score-only edit distance
 - `verification_status`
 - `verified`
 - `query_start`, `query_end`, `target_start`, `target_end`
@@ -188,7 +188,7 @@ Edit distance has fixed unit costs: substitution, insertion, and deletion cost
 Edit-distance backend selection:
 
 ```bash
---engine auto|hcp|hcp-linear|adaptive-banded
+--engine auto|hcp|hcp-linear|adaptive-banded|myers
 ```
 
 `auto` is the default. It first attempts an exact bounded banded traceback for
@@ -197,7 +197,14 @@ outside the auto band. `hcp` is the generic summary-tree traceback engine.
 `hcp-linear` uses the same HCP contract with one-layer blocks to minimize
 retained state. `adaptive-banded` is an exact specialized traceback backend for
 low-edit-distance inputs; it ignores HCP block sizing and rejects
-`--block-size`.
+`--block-size`. `myers` is exact score-only bit-vector distance; use it with
+`--score-only`.
+
+`edit-distance --score-only` omits traceback, CIGAR, aligned strings, operation
+counts, and `path_score`. With `--engine auto`, score-only mode selects the
+arbitrary-length Myers backend. With `--verify`, it can still compare the
+reported distance against a full-table baseline when the pair is within
+`--verify-limit`.
 
 `--block-size` is accepted only with explicit HCP engines: `hcp` and
 `hcp-linear`.
@@ -222,6 +229,13 @@ hcp-align global-affine \
 hcp-align edit-distance \
   --query-file reads.fa --target-file references.fa \
   --verify --format jsonl --output results.jsonl
+```
+
+```bash
+hcp-align edit-distance \
+  --score-only \
+  --query kitten --target sitting \
+  --verify --format json
 ```
 
 ```bash

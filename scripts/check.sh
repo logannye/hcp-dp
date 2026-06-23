@@ -151,6 +151,12 @@ assert_eq "$(printf '%s' "$CLI_EDIT" | json_field distance)" "3" "CLI edit-dista
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field backend)" "adaptive-banded" "CLI edit-distance auto backend"
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field verified)" "true" "CLI edit-distance verified"
 
+say "Run CLI: edit-distance score-only"
+CLI_EDIT_SCORE=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --score-only --query kitten --target sitting --verify --format json)
+assert_eq "$(printf '%s' "$CLI_EDIT_SCORE" | json_field distance)" "3" "CLI score-only edit-distance distance"
+assert_eq "$(printf '%s' "$CLI_EDIT_SCORE" | json_field backend)" "myers" "CLI score-only edit-distance backend"
+assert_eq "$(printf '%s' "$CLI_EDIT_SCORE" | json_field verification_status)" "full" "CLI score-only edit-distance verification"
+
 say "Run CLI: edit-distance adaptive-banded"
 CLI_EDIT_BANDED=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --engine adaptive-banded --query kitten --target sitting --verify --format json)
 assert_eq "$(printf '%s' "$CLI_EDIT_BANDED" | json_field distance)" "3" "CLI adaptive-banded edit-distance distance"

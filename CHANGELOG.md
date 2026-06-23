@@ -12,6 +12,8 @@ the alpha release when they improve correctness or clarity.
 - Added default `hcp-align edit-distance --engine auto` selection, which tries a
   bounded exact banded traceback before falling back to HCP linear-space
   traceback.
+- Added `hcp-align edit-distance --score-only`, backed by exact
+  arbitrary-length Myers bit-vector distance.
 - Added `hcp-linear`, adaptive-banded, arbitrary-length Myers, full-table, and
   linear-space edit-distance comparison modes to
   `scale_probe --mode edit-distance-deep`.

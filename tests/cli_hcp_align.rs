@@ -397,6 +397,72 @@ fn edit_distance_alternate_engines_return_verified_paths() {
 }
 
 #[test]
+fn edit_distance_score_only_uses_myers_without_traceback() {
+    let output = run(&[
+        "edit-distance",
+        "--score-only",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["distance"], 3);
+    assert!(json["path_score"].is_null());
+    assert_eq!(json["verification_status"], "full");
+    assert_eq!(json["verified"], true);
+    assert_eq!(json["backend"], "myers");
+    assert_eq!(json["block_size"], 0);
+    assert_eq!(json["path_length"], 0);
+    assert_eq!(json["cigar"], "");
+    assert!(json.get("operation_counts").is_none());
+    assert!(json.get("operations").is_none());
+}
+
+#[test]
+fn edit_distance_score_only_reports_score_only_when_full_verify_is_skipped() {
+    let output = run(&[
+        "edit-distance",
+        "--score-only",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--verify-limit",
+        "1",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["distance"], 3);
+    assert!(json["path_score"].is_null());
+    assert_eq!(json["verification_status"], "score_only");
+    assert!(json["verified"].is_null());
+    assert_eq!(json["backend"], "myers");
+}
+
+#[test]
+fn edit_distance_myers_requires_score_only() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "myers",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("score-only"));
+}
+
+#[test]
 fn adaptive_banded_engine_rejects_block_size_override() {
     let output = run(&[
         "edit-distance",

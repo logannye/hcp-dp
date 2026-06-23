@@ -13,7 +13,7 @@ validation where applicable.
 | Edit distance, auto backend | yes | yes | n/a | yes, default `edit-distance` | Edlib optional | CLI smoke tests, deep comparison report | Deterministically selects exact adaptive-banded traceback or HCP linear-space fallback. |
 | Edit distance, HCP traceback | yes | yes | yes | yes, `edit-distance --engine hcp` | Edlib optional | deep comparison report, `hcp` and `hcp-linear` engines | Generic summary-tree traceback. |
 | Edit distance, adaptive banded | yes | yes | n/a | yes, `edit-distance --engine adaptive-banded` | checked against linear-space baseline; Edlib optional | deep comparison report, `adaptive-banded-path` engine | Exact specialized traceback; fastest when final edit distance is small. |
-| Edit distance, Myers bit-vector | yes | no | n/a | report tool only | checked against linear-space baseline | deep comparison report, `myers` engine | Exact distance only; arbitrary pattern length. |
+| Edit distance, Myers bit-vector | yes | no | n/a | yes, `edit-distance --score-only` | checked against linear-space baseline | deep comparison report, `myers` engine | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | n/a | report tool only | checked against linear-space baseline | deep comparison report, `myers-u64` engine | Exact distance only; pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | yes, `semiglobal-linear` | no external anchor yet | `scale_probe`, report workflow | Full query against any target interval; swap inputs for the opposite orientation. |
 

@@ -26,8 +26,8 @@ The formal JSON Schema is available at
 | `mode` | One of `global-linear`, `global-affine`, `local-linear`, `edit-distance`, `semiglobal-linear`. |
 | `score` | Signed alignment score for score-based modes; `null` for edit distance. |
 | `distance` | Edit distance for `edit-distance`; `null` for score-based modes. |
-| `path_score` | Objective value computed independently from the returned path. |
-| `verification_status` | `full`, `path_only`, or `failed`. |
+| `path_score` | Objective value computed independently from the returned path; `null` for score-only edit distance. |
+| `verification_status` | `full`, `path_only`, `score_only`, or `failed`. |
 | `verified` | Compatibility boolean for full verification pass/fail. Prefer `verification_status`. |
 | `query_start`, `query_end` | Half-open query coordinates covered by the returned trace. |
 | `target_start`, `target_end` | Half-open target coordinates covered by the returned trace. |
@@ -43,7 +43,7 @@ The formal JSON Schema is available at
 
 | Field | When Present |
 |---|---|
-| `backend` | Selected non-default per-problem backend, currently `hcp-linear` or `adaptive-banded` for edit distance, including selections made by `--engine auto`. |
+| `backend` | Selected non-default per-problem backend, currently `hcp-linear`, `adaptive-banded`, or `myers` for edit distance, including selections made by `--engine auto`. |
 | `operation_counts` | Default for JSON/JSONL with `--operation-detail summary`. |
 | `operations` | Only with `--operation-detail full`. |
 | `aligned_query`, `aligned_target` | Only with `--show-alignment`. |

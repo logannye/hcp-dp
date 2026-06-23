@@ -20,6 +20,8 @@ CLI is immediately useful.
 
 - Levenshtein edit distance with deterministic `--engine auto` selection and an
   exact adaptive-banded traceback backend for low-edit-distance pairs.
+- Levenshtein score-only mode with an exact arbitrary-length Myers bit-vector
+  backend for fast distance queries that do not need traceback.
 - Global Needleman-Wunsch alignment with linear gaps.
 - Global Gotoh alignment with affine gaps.
 - Smith-Waterman local alignment with linear gaps.
@@ -84,6 +86,18 @@ hcp-align edit-distance \
   --engine adaptive-banded \
   --query ACGTACGT \
   --target ACGTTCGT \
+  --verify \
+  --format json
+```
+
+When only the distance is needed, `--score-only` uses the exact Myers
+bit-vector backend and omits traceback, CIGAR, operations, and `path_score`:
+
+```bash
+hcp-align edit-distance \
+  --score-only \
+  --query kitten \
+  --target sitting \
   --verify \
   --format json
 ```
@@ -237,9 +251,10 @@ hcp-align semiglobal-linear \
 Every `hcp-align` result includes:
 
 - the reported score or distance,
-- an independently computed `path_score`,
+- an independently computed `path_score` when a traceback is produced,
 - half-open query and target coordinates,
-- a CIGAR-like operation string using `=`, `X`, `D`, and `I`,
+- a CIGAR-like operation string using `=`, `X`, `D`, and `I` when traceback is
+  produced,
 - `verification_status`.
 
 With `--verify`, `hcp-align` also runs a full-table baseline when the larger
@@ -248,6 +263,7 @@ input length is within `--verify-limit`:
 ```text
 full       path score and full-table baseline matched
 path_only  path score matched, full-table baseline was skipped
+score_only exact score-only backend ran without traceback; full baseline was skipped
 failed     path score or full-table baseline disagreed
 ```
 
@@ -296,7 +312,7 @@ Use `HcpEngine::linear_space(problem)` when retained memory is the priority.
 | Edit distance, auto backend | yes | yes | yes | Edlib optional | Default; selects adaptive-banded traceback or HCP fallback. |
 | Edit distance, HCP traceback | yes | yes | yes | Edlib optional | Generic exact traceback engine. |
 | Edit distance, adaptive banded | yes | yes | yes | Edlib optional | Fastest when final edit distance is small. |
-| Edit distance, Myers bit-vector | yes | no | report tool only | checked internally | Exact distance only; arbitrary pattern length. |
+| Edit distance, Myers bit-vector | yes | no | yes, `edit-distance --score-only` | checked internally | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | report tool only | checked internally | Pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | no external anchor yet | Full query against any target interval. |
 

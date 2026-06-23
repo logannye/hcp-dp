@@ -3,7 +3,7 @@
 `hcp-align` is the alpha command-line surface for the verified sequence
 alignment kernels.
 
-## Install From Source
+## Install
 
 ```bash
 cargo install --path .
@@ -16,12 +16,9 @@ During development, the same commands can be run through Cargo:
 cargo run --bin hcp-align -- global-linear --query ACGT --target ACGT
 ```
 
-GitHub alpha builds are produced by the manual `Release Alpha` workflow. Each
+GitHub alpha builds are available from the repository's Releases page. Each
 artifact includes the `hcp-align` binary, README, license, and a SHA-256
 checksum.
-
-After the first alpha prerelease is published, downloadable artifacts will be
-available from the GitHub Releases page.
 
 ## Commands
 

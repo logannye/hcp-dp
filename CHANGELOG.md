@@ -7,13 +7,14 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
+- No unreleased changes yet.
+
+## 0.1.0-alpha.1 - 2026-06-23
+
 - Polished public README, project health files, output schema documentation, and
   sample input data.
 - Added strict rustdoc warning checks to CI and local smoke checks.
 - Added release-binary smoke testing before alpha artifact upload.
-
-## 0.1.0-alpha.1 - Planned
-
 - First GitHub alpha binary release for `hcp-align`.
 - Exact alignment modes:
   - global Needleman-Wunsch with linear gaps,

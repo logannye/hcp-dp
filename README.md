@@ -20,6 +20,8 @@ conservative until they are backed by release artifacts.
 
 ## Try It
 
+Install from source:
+
 ```bash
 cargo install --path .
 
@@ -27,6 +29,11 @@ hcp-align edit-distance \
   --query kitten --target sitting \
   --verify --format json
 ```
+
+Or download a prerelease binary from
+[GitHub Releases](https://github.com/logannye/hcp-dp/releases). Each alpha
+artifact contains the `hcp-align` binary, README, license, and a SHA-256
+checksum.
 
 Representative output excerpt:
 
@@ -238,9 +245,9 @@ is not part of default CI.
 
 ## Release Status
 
-GitHub alpha binaries are produced by the manual `Release Alpha` workflow. Each
-artifact contains `hcp-align`, README, license, and a SHA-256 checksum. The repo
-is not published to crates.io yet.
+The current alpha release line is `v0.1.0-alpha.*`. GitHub prerelease artifacts
+are the supported install path for users who do not want to build from source.
+The repo is not published to crates.io yet.
 
 ## Adding A New Problem
 

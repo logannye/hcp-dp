@@ -17,7 +17,7 @@ fi
 
 SCALE_PROBE_MAX_SIZE="${SCALE_PROBE_MAX_SIZE:-}"
 if [[ -z "${SCALE_PROBE_MAX_SIZE}" && "${RUNNER_OS:-}" == "Windows" ]]; then
-  SCALE_PROBE_MAX_SIZE=1024
+  SCALE_PROBE_MAX_SIZE=512
 fi
 
 # Repo root

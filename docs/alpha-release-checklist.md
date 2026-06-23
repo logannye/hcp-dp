@@ -46,7 +46,7 @@ target/hcp-dp-report/
 - `json`, `jsonl`, `tsv`, and `cigar` outputs are tested.
 - Independent path scoring is always computed.
 - `--verify` reports `full`, `path_only`, or `failed` clearly.
-- Windows CI may set `SCALE_PROBE_MAX_SIZE` to keep smoke runtime comfortably
+- Windows CI sets `SCALE_PROBE_MAX_SIZE=512` to keep smoke runtime comfortably
   below the job budget while local probes keep the larger default sizes.
 - Smith-Waterman and semi-global traceback avoid repeated full selected-path
   reconstruction during split selection.

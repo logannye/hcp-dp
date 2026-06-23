@@ -324,6 +324,7 @@ See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
 - [Technical design](docs/design.md)
 - [Capability matrix](docs/capabilities.md)
 - [Output schema reference](docs/output-schema.md)
+- [Sample report](docs/sample-report.md)
 - [Alpha release checklist](docs/alpha-release-checklist.md)
 
 ## Validation And Reports
@@ -341,6 +342,19 @@ Generate a correctness and performance report:
 
 ```bash
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
+```
+
+The checked-in [sample report](docs/sample-report.md) is generated from a small
+bounded run to show report structure. It is an example artifact, not a
+performance claim for other machines:
+
+```bash
+python3 scripts/perf_report.py \
+  --scenario edit_distance \
+  --verify-limit 128 \
+  --max-size 128 \
+  --skip-external \
+  --sample-output docs/sample-report.md
 ```
 
 Run optional external validation against Parasail and Edlib when installed:

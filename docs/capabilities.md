@@ -50,6 +50,10 @@ python3 scripts/perf_report.py
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
 ```
 
+A checked-in [sample report](sample-report.md) shows the generated report
+structure from a small bounded run. It is intentionally labeled as an example,
+not as a universal benchmark result.
+
 The report directory contains:
 
 ```text

@@ -56,7 +56,7 @@ def metadata(argv: list[str]) -> dict[str, str]:
     }
 
 
-def run_scale_probe(verify_limit: int, scenario: str | None) -> list[dict]:
+def run_scale_probe(verify_limit: int, scenario: str | None, max_size: int | None) -> list[dict]:
     cmd = [
         "cargo",
         "run",
@@ -71,6 +71,8 @@ def run_scale_probe(verify_limit: int, scenario: str | None) -> list[dict]:
     ]
     if scenario:
         cmd.extend(["--scenario", scenario])
+    if max_size is not None:
+        cmd.extend(["--max-size", str(max_size)])
     proc = run(cmd)
     if proc.returncode != 0:
         raise RuntimeError(f"scale_probe failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
@@ -89,6 +91,8 @@ def run_scale_probe(verify_limit: int, scenario: str | None) -> list[dict]:
             "--mode",
             "edit-distance-deep",
         ]
+        if max_size is not None:
+            deep_cmd.extend(["--max-size", str(max_size)])
         proc = run(deep_cmd)
         if proc.returncode != 0:
             raise RuntimeError(
@@ -142,6 +146,8 @@ def write_report(
     external: list[dict],
     external_note: str,
     bench_note: str,
+    report_path: Path = REPORT_PATH,
+    preface: str | None = None,
 ) -> None:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     scale_counts = status_counts(measurements)
@@ -249,24 +255,56 @@ def write_report(
         )
 
     lines.extend(["", "## Criterion", "", bench_note, ""])
-    REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
+    if preface:
+        lines = [preface, ""] + lines
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--verify-limit", type=int, default=512)
     parser.add_argument("--scenario")
+    parser.add_argument("--max-size", type=int)
     parser.add_argument("--benches", action="store_true")
     parser.add_argument("--skip-external", action="store_true")
     parser.add_argument("--external-required", action="store_true")
+    parser.add_argument(
+        "--sample-output",
+        type=Path,
+        help="also write a checked-in-style example report with a sample disclaimer",
+    )
     args = parser.parse_args(argv[1:])
 
     try:
         meta = metadata(argv)
-        measurements = run_scale_probe(args.verify_limit, args.scenario)
+        measurements = run_scale_probe(args.verify_limit, args.scenario, args.max_size)
         external, external_note = run_external_validation(args.external_required, args.skip_external)
         bench_note = maybe_run_benches(args.benches)
         write_report(meta, measurements, external, external_note, bench_note)
+        if args.sample_output:
+            preface = (
+                "> Sample artifact: this checked-in report was generated from a small bounded run "
+                "on one machine. It demonstrates report structure and verification fields; it is "
+                "not a universal performance claim. Regenerate local artifacts with "
+                "`python3 scripts/perf_report.py`."
+            )
+            sample_meta = dict(meta)
+            sample_meta["timestamp_utc"] = "example run"
+            sample_meta["commit"] = "local checkout used to generate the sample"
+            sample_meta["rustc"] = "local Rust toolchain"
+            sample_meta["cargo"] = "local Cargo toolchain"
+            sample_meta["os"] = "local operating system"
+            sample_meta["cpu"] = "local CPU"
+            write_report(
+                sample_meta,
+                measurements,
+                external,
+                external_note,
+                bench_note,
+                report_path=args.sample_output,
+                preface=preface,
+            )
     except RuntimeError as exc:
         print(f"[report] {exc}", file=sys.stderr)
         return 1

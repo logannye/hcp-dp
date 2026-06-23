@@ -17,6 +17,8 @@ the alpha release when they improve correctness or clarity.
 - Added `hcp-linear`, adaptive-banded, arbitrary-length Myers, full-table, and
   linear-space edit-distance comparison modes to
   `scale_probe --mode edit-distance-deep`.
+- Added `scripts/perf_report.py --max-size` and `--sample-output`, plus a
+  checked-in bounded sample report under `docs/sample-report.md`.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

@@ -1,2 +1,32 @@
-{}
-
+{
+  "edit_distance_perf_height_compressed/edit_distance_len_1000": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  },
+  "lcs_perf_height_compressed/lcs_len_1000": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  },
+  "nw_affine_perf_height_compressed/nw_affine_len_500": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  },
+  "nw_perf_height_compressed/nw_len_1000": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  },
+  "semiglobal_perf_height_compressed/semiglobal_len_1000": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  },
+  "smith_waterman_perf_height_compressed/smith_waterman_len_500": {
+    "median": 5000000000.0,
+    "unit": "ns",
+    "note": "Generous enforced budget for nightly dev-mode Criterion smoke checks."
+  }
+}

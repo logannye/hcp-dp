@@ -32,6 +32,7 @@ checksum.
 | `local-linear` | Smith-Waterman local alignment with a linear gap penalty. |
 | `edit-distance` | Exact Levenshtein edit distance and traceback. |
 | `semiglobal-linear` | Full query aligned against any target interval; target prefix/suffix are free. |
+| `seeded-global-linear` | Minimizer-seeded exact global alignment inside a candidate extension window. |
 
 ## Inputs
 
@@ -64,6 +65,8 @@ One-vs-many and all-vs-all modes are deferred.
 | `jsonl` | One JSON object per pair. Preferred for batch workflows. |
 | `tsv` | Stable tabular output with detailed fields. |
 | `cigar` | Compact tabular output focused on ids, score/distance, coordinates, and CIGAR. |
+| `paf` | Pairwise mApping Format rows for traceback-producing alignments. |
+| `sam` | SAM records with headers for traceback-producing alignments. |
 
 Per-pair structured output includes:
 
@@ -81,6 +84,7 @@ Per-pair structured output includes:
 - `cigar`
 - `operation_counts` by default
 - `operations` only with `--operation-detail full`
+- `certificate` only with `--certificate`
 - `block_size`
 - `path_length`
 - `summary_build_ms`, `reconstruction_ms`, `verification_ms`
@@ -91,6 +95,33 @@ Per-pair structured output includes:
 The schema reference is documented in
 [docs/output-schema.md](output-schema.md), with a formal JSON Schema at
 [`schemas/hcp-align.v1.schema.json`](../schemas/hcp-align.v1.schema.json).
+
+PAF output uses the standard 12 required fields with unknown mapping quality
+`255`. Optional tags include `AS:i` for score-based modes, `NM:i`, `cg:Z` for a
+SAM/PAF-oriented extended CIGAR, `vs:Z` for verification status, and `pi:i` for
+pair index. PAF requires traceback and therefore rejects
+`edit-distance --score-only`.
+
+SAM output emits `@HD` and `@SQ` headers, then one primary forward-strand record
+per successful pair with unknown mapping quality `255`, unknown qualities (`*`),
+reference-oriented CIGAR, and soft clipping for query bases outside a local
+trace. Tags include `AS:i` for score-based modes, `NM:i`, `VS:Z`, and `PI:i`.
+SAM requires traceback and therefore rejects `edit-distance --score-only`.
+
+## Seeded Extension
+
+`seeded-global-linear` uses minimizers to find exact shared k-mers, chains
+monotone seed hits, expands the selected chain by a flank, then runs exact
+Needleman-Wunsch alignment inside that candidate window:
+
+```bash
+seeded-global-linear --seed-k <N> --seed-window <N> --seed-flank <N>
+```
+
+The reported coordinates are original input coordinates. The score and CIGAR are
+exact for the selected extension window, not for the full pair. If no shared
+minimizer seed is found, the command fails and suggests smaller seed parameters
+or `global-linear`.
 
 `verified` remains for simple compatibility with earlier JSON output. New
 consumers should use `verification_status`.
@@ -119,6 +150,18 @@ Progress is controlled with:
 
 Progress is always written to stderr. The default `auto` only prints progress
 for multi-record runs when stderr is attached to a terminal.
+
+Emit a compact proof-carrying result certificate with:
+
+```bash
+--certificate
+```
+
+The certificate is intended for JSON/JSONL consumers. It hashes the normalized
+query, normalized target, scoring parameters, result fields, and traceback
+operations with SHA-256. Score-only edit-distance records include the same
+input/parameter/result hashes but set `trace_sha256` to `null` because no path
+is produced.
 
 Batch execution can continue after per-pair failures:
 
@@ -181,6 +224,42 @@ Affine mode:
 
 Affine convention: the first position in a gap costs
 `gap_open + gap_extend`; each continued gap position costs `gap_extend`.
+
+Affine traceback backend selection:
+
+```bash
+global-affine --engine hcp|wavefront|auto
+global-affine --wavefront-band <N>
+```
+
+`hcp` is the default generic summary-tree traceback engine and is the only
+affine engine that accepts `--block-size`. `wavefront` is an exact
+diagonal-band affine traceback backend for low-difference global alignments; it
+uses `--wavefront-band` as the diagonal half-band and fails if the optimum is
+outside that band. `auto` tries the same band first and falls back to HCP
+linear-space traceback when needed.
+
+For `global-linear`, `global-affine`, `local-linear`, and
+`semiglobal-linear`, substitution scoring can use a named or custom matrix
+instead of match/mismatch scoring:
+
+```bash
+--matrix blosum62
+--matrix-file <PATH>
+```
+
+`--matrix` and `--matrix-file` are mutually exclusive. When either is present,
+the matrix supplies all substitution scores and `--match` /
+`--mismatch-penalty` are ignored. Matrix inputs are validated before alignment,
+so unsupported symbols fail with the query or target record id. Custom matrix
+files are whitespace-delimited square tables with a header row and matching row
+labels:
+
+```text
+  A C
+A 2 -1
+C -1 3
+```
 
 Edit distance has fixed unit costs: substitution, insertion, and deletion cost
 `1`.
@@ -276,5 +355,7 @@ hcp-align semiglobal-linear \
 - Multi-threaded batch mode requires the optional `parallel` feature.
 - `adaptive-banded` edit-distance traceback is exact but worst-case quadratic
   when inputs are far from the main diagonal.
+- `--certificate` hashes the emitted result and trace; it is not a formal proof
+  system and does not replace independent score/path validation.
 - Performance is still reported conservatively until release artifacts include
   larger reproducible benchmarks.

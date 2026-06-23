@@ -3,7 +3,10 @@
 //! Scoring convention: the first position in a gap costs
 //! `gap_open + gap_extend`; each continued gap position costs `gap_extend`.
 
-use crate::traits::{HcpProblem, SummaryApply};
+use crate::{
+    scoring::SubstitutionScoring,
+    traits::{HcpProblem, SummaryApply},
+};
 
 const NEG_INF: i32 = i32::MIN / 4;
 const STATES: [AffineState; 3] = [AffineState::Match, AffineState::GapInT, AffineState::GapInS];
@@ -80,6 +83,12 @@ pub struct NwAffineBoundary {
     pub states: AffineStateSet,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NwAffineTrace {
+    pub score: i32,
+    pub path: Vec<NwAffineState>,
+}
+
 #[derive(Clone)]
 pub struct NwAffineProblem<'a> {
     pub s: &'a [u8],
@@ -88,6 +97,7 @@ pub struct NwAffineProblem<'a> {
     pub mismatch_penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
+    pub scoring: SubstitutionScoring,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,10 +113,9 @@ pub struct NwAffineSummary<'a> {
     t: &'a [u8],
     start: usize,
     end: usize,
-    match_score: i32,
-    mismatch_penalty: i32,
     gap_open: i32,
     gap_extend: i32,
+    scoring: SubstitutionScoring,
 }
 
 impl<'a> NwAffineProblem<'a> {
@@ -125,6 +134,25 @@ impl<'a> NwAffineProblem<'a> {
             mismatch_penalty,
             gap_open,
             gap_extend,
+            scoring: SubstitutionScoring::match_mismatch(match_score, mismatch_penalty),
+        }
+    }
+
+    pub fn with_scoring(
+        s: &'a [u8],
+        t: &'a [u8],
+        scoring: SubstitutionScoring,
+        gap_open: i32,
+        gap_extend: i32,
+    ) -> Self {
+        Self {
+            s,
+            t,
+            match_score: 0,
+            mismatch_penalty: 0,
+            gap_open,
+            gap_extend,
+            scoring,
         }
     }
 
@@ -176,11 +204,7 @@ impl<'a> NwAffineProblem<'a> {
     }
 
     fn score_pair(&self, a: u8, b: u8) -> i32 {
-        if a == b {
-            self.match_score
-        } else {
-            -self.mismatch_penalty
-        }
+        self.scoring.score(a, b)
     }
 
     fn gap_transition(&self, from: AffineState, to: AffineState) -> i32 {
@@ -202,8 +226,7 @@ impl<'a> NwAffineProblem<'a> {
             frontier = advance_affine_row(
                 self.s[layer],
                 &self.t[p..q],
-                self.match_score,
-                self.mismatch_penalty,
+                &self.scoring,
                 self.gap_open,
                 self.gap_extend,
                 &frontier,
@@ -285,8 +308,7 @@ impl<'a> HcpProblem for NwAffineProblem<'a> {
         advance_affine_row(
             self.s[layer],
             self.t,
-            self.match_score,
-            self.mismatch_penalty,
+            &self.scoring,
             self.gap_open,
             self.gap_extend,
             frontier,
@@ -300,10 +322,9 @@ impl<'a> HcpProblem for NwAffineProblem<'a> {
             t: self.t,
             start: a,
             end: b,
-            match_score: self.match_score,
-            mismatch_penalty: self.mismatch_penalty,
             gap_open: self.gap_open,
             gap_extend: self.gap_extend,
+            scoring: self.scoring.clone(),
         }
     }
 
@@ -317,28 +338,18 @@ impl<'a> HcpProblem for NwAffineProblem<'a> {
             "affine NW summaries must belong to the same problem"
         );
         assert_eq!(
-            (
-                left.match_score,
-                left.mismatch_penalty,
-                left.gap_open,
-                left.gap_extend,
-            ),
-            (
-                right.match_score,
-                right.mismatch_penalty,
-                right.gap_open,
-                right.gap_extend,
-            )
+            (left.gap_open, left.gap_extend),
+            (right.gap_open, right.gap_extend)
         );
+        assert_eq!(left.scoring, right.scoring);
         NwAffineSummary {
             s: self.s,
             t: self.t,
             start: left.start,
             end: right.end,
-            match_score: self.match_score,
-            mismatch_penalty: self.mismatch_penalty,
             gap_open: self.gap_open,
             gap_extend: self.gap_extend,
+            scoring: self.scoring.clone(),
         }
     }
 
@@ -549,8 +560,7 @@ impl<'a> SummaryApply<NwAffineFrontier> for NwAffineSummary<'a> {
             current = advance_affine_row(
                 self.s[layer],
                 self.t,
-                self.match_score,
-                self.mismatch_penalty,
+                &self.scoring,
                 self.gap_open,
                 self.gap_extend,
                 &current,
@@ -590,6 +600,184 @@ impl NwAffineFrontier {
     }
 }
 
+#[derive(Clone, Copy)]
+struct BandedAffineCell {
+    scores: [i32; 3],
+    predecessors: [Option<AffineState>; 3],
+}
+
+impl BandedAffineCell {
+    fn empty() -> Self {
+        Self {
+            scores: [NEG_INF; 3],
+            predecessors: [None; 3],
+        }
+    }
+}
+
+struct BandedAffineRow {
+    start_col: usize,
+    cells: Vec<BandedAffineCell>,
+}
+
+impl BandedAffineRow {
+    fn new(row: usize, target_len: usize, diagonal_band: usize) -> Self {
+        let start_col = row.saturating_sub(diagonal_band);
+        let end_col = row.saturating_add(diagonal_band).min(target_len);
+        Self {
+            start_col,
+            cells: vec![BandedAffineCell::empty(); end_col - start_col + 1],
+        }
+    }
+
+    fn contains(&self, col: usize) -> bool {
+        col >= self.start_col && col < self.start_col + self.cells.len()
+    }
+
+    fn get(&self, col: usize) -> Option<&BandedAffineCell> {
+        self.contains(col)
+            .then(|| &self.cells[col - self.start_col])
+    }
+
+    fn get_mut(&mut self, col: usize) -> Option<&mut BandedAffineCell> {
+        self.contains(col)
+            .then(move || &mut self.cells[col - self.start_col])
+    }
+}
+
+/// Exact global affine traceback constrained to a diagonal band.
+///
+/// Returns `None` when the terminal cell is outside the band or when no
+/// feasible path inside the band reaches the terminal cell. The returned path
+/// uses the same state semantics as [`NwAffineProblem`] and can be checked with
+/// [`NwAffineProblem::score_path`].
+pub fn trace_banded_affine(
+    problem: &NwAffineProblem<'_>,
+    diagonal_band: usize,
+) -> Option<NwAffineTrace> {
+    let n = problem.n();
+    let m = problem.m();
+    if n.abs_diff(m) > diagonal_band {
+        return None;
+    }
+
+    let mut rows: Vec<BandedAffineRow> = (0..=n)
+        .map(|row| BandedAffineRow::new(row, m, diagonal_band))
+        .collect();
+    rows[0].get_mut(0)?.scores[AffineState::Match.idx()] = 0;
+
+    for row in 0..=n {
+        let start = rows[row].start_col;
+        let end = rows[row].start_col + rows[row].cells.len() - 1;
+        for col in start..=end {
+            if row == 0 && col == 0 {
+                continue;
+            }
+
+            let mut scores = [NEG_INF; 3];
+            let mut predecessors = [None; 3];
+
+            if row > 0 && col > 0 {
+                if let Some(diag) = rows[row - 1].get(col - 1) {
+                    let pair = problem.score_pair(problem.s[row - 1], problem.t[col - 1]);
+                    let (score, predecessor) = best_banded_transition(diag.scores, |state| {
+                        add_score(diag.scores[state.idx()], pair)
+                    });
+                    scores[AffineState::Match.idx()] = score;
+                    predecessors[AffineState::Match.idx()] = predecessor;
+                }
+            }
+
+            if row > 0 {
+                if let Some(up) = rows[row - 1].get(col) {
+                    let (score, predecessor) = best_banded_transition(up.scores, |state| {
+                        add_score(
+                            up.scores[state.idx()],
+                            problem.gap_transition(state, AffineState::GapInT),
+                        )
+                    });
+                    scores[AffineState::GapInT.idx()] = score;
+                    predecessors[AffineState::GapInT.idx()] = predecessor;
+                }
+            }
+
+            if col > 0 && rows[row].contains(col - 1) {
+                let left_scores = rows[row]
+                    .get(col - 1)
+                    .expect("checked left cell must exist")
+                    .scores;
+                let (score, predecessor) = best_banded_transition(left_scores, |state| {
+                    add_score(
+                        left_scores[state.idx()],
+                        problem.gap_transition(state, AffineState::GapInS),
+                    )
+                });
+                scores[AffineState::GapInS.idx()] = score;
+                predecessors[AffineState::GapInS.idx()] = predecessor;
+            }
+
+            let cell = rows[row]
+                .get_mut(col)
+                .expect("current band cell must exist while filling");
+            cell.scores = scores;
+            cell.predecessors = predecessors;
+        }
+    }
+
+    let end_cell = rows[n].get(m)?;
+    let (mut state, score) = best_allowed_cell(end_cell.scores, AffineStateSet::all())?;
+    let mut row = n;
+    let mut col = m;
+    let mut rev_path = Vec::with_capacity(n + m + 1);
+    rev_path.push(NwAffineState { row, col, state });
+
+    while row > 0 || col > 0 {
+        let predecessor = rows[row].get(col)?.predecessors[state.idx()]?;
+        match state {
+            AffineState::Match => {
+                row = row.checked_sub(1)?;
+                col = col.checked_sub(1)?;
+            }
+            AffineState::GapInT => {
+                row = row.checked_sub(1)?;
+            }
+            AffineState::GapInS => {
+                col = col.checked_sub(1)?;
+            }
+        }
+        state = predecessor;
+        rev_path.push(NwAffineState { row, col, state });
+    }
+
+    if state != AffineState::Match {
+        return None;
+    }
+    rev_path.reverse();
+    Some(NwAffineTrace {
+        score,
+        path: rev_path,
+    })
+}
+
+fn best_banded_transition<F>(scores: [i32; 3], transition_score: F) -> (i32, Option<AffineState>)
+where
+    F: Fn(AffineState) -> i32,
+{
+    let mut best_score = NEG_INF;
+    let mut best_state = None;
+    for state in STATES {
+        if scores[state.idx()] <= NEG_INF / 2 {
+            continue;
+        }
+        let score = transition_score(state);
+        if score > best_score {
+            best_score = score;
+            best_state = Some(state);
+        }
+    }
+    (best_score, best_state)
+}
+
 fn constrained_start_frontier(
     width: usize,
     states: AffineStateSet,
@@ -618,8 +806,7 @@ fn constrained_start_frontier(
 fn advance_affine_row(
     s_ch: u8,
     t: &[u8],
-    match_score: i32,
-    mismatch_penalty: i32,
+    scoring: &SubstitutionScoring,
     gap_open: i32,
     gap_extend: i32,
     frontier: &NwAffineFrontier,
@@ -639,11 +826,7 @@ fn advance_affine_row(
     next.gap_in_t[0] = best_to_gap(up_col_zero, AffineState::GapInT, gap_open, gap_extend);
 
     for col in 1..=t.len() {
-        let pair = if s_ch == t[col - 1] {
-            match_score
-        } else {
-            -mismatch_penalty
-        };
+        let pair = scoring.score(s_ch, t[col - 1]);
         let diag = [
             frontier.match_scores[col - 1],
             frontier.gap_in_t[col - 1],
@@ -803,5 +986,20 @@ mod tests {
             Some((0, 3))
         );
         assert_eq!(problem.score_path(&path), Some(score));
+    }
+
+    #[test]
+    fn banded_affine_trace_matches_hcp_score() {
+        let problem = NwAffineProblem::new(b"ACGTACGT", b"ACGTTACGT", 2, 1, -3, -1);
+        let (hcp_score, _) = HcpEngine::new(problem.clone()).run();
+        let trace = trace_banded_affine(&problem, 2).expect("band should contain optimum");
+        assert_eq!(trace.score, hcp_score);
+        assert_eq!(problem.score_path(&trace.path), Some(trace.score));
+    }
+
+    #[test]
+    fn banded_affine_trace_rejects_too_narrow_band() {
+        let problem = NwAffineProblem::new(b"AAAA", b"AAAATTTT", 2, 1, -3, -1);
+        assert!(trace_banded_affine(&problem, 2).is_none());
     }
 }

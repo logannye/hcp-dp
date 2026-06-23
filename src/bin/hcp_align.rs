@@ -14,14 +14,17 @@ use hcp_dp::{
             distance_adaptive_banded, distance_myers, trace_adaptive_banded, trace_banded,
             EditDistanceProblem,
         },
-        nw_affine::{NwAffineProblem, NwAffineState},
+        nw_affine::{trace_banded_affine, NwAffineProblem, NwAffineState},
         nw_align::NwProblem,
         semiglobal::{SemiGlobalCell, SemiGlobalProblem},
         smith_waterman::{SmithWatermanProblem, SwCell},
     },
+    scoring::{SubstitutionMatrix, SubstitutionScoring},
+    seeding::seeded_window,
     HcpEngine, HcpProblem, HcpRunStats,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -87,6 +90,10 @@ fn run() -> Result<bool, String> {
                 output,
             )
         }
+        Command::SeededGlobalLinear(args) => {
+            let output = args.output.clone();
+            (run_seeded_linear_mode(args)?, output)
+        }
     };
 
     write_reports(&reports, &output)?;
@@ -116,6 +123,8 @@ enum Command {
     EditDistance(EditDistanceCommand),
     /// Semi-global linear alignment: full query against any target interval.
     SemiglobalLinear(LinearCommand),
+    /// Minimizer-seeded exact global alignment inside a candidate window.
+    SeededGlobalLinear(SeededLinearCommand),
 }
 
 #[derive(Args)]
@@ -131,6 +140,20 @@ struct LinearCommand {
 }
 
 #[derive(Args)]
+struct SeededLinearCommand {
+    #[command(flatten)]
+    input: InputArgs,
+    #[command(flatten)]
+    output: OutputArgs,
+    #[command(flatten)]
+    block: BlockArgs,
+    #[command(flatten)]
+    scoring: LinearScoring,
+    #[command(flatten)]
+    seed: SeedArgs,
+}
+
+#[derive(Args)]
 struct AffineCommand {
     #[command(flatten)]
     input: InputArgs,
@@ -140,6 +163,12 @@ struct AffineCommand {
     block: BlockArgs,
     #[command(flatten)]
     scoring: AffineScoring,
+    /// Exact traceback engine to use.
+    #[arg(long, value_enum, default_value_t = AffineEngine::Hcp)]
+    engine: AffineEngine,
+    /// Diagonal half-band used by --engine wavefront or --engine auto.
+    #[arg(long, default_value_t = 64)]
+    wavefront_band: usize,
 }
 
 #[derive(Args)]
@@ -203,6 +232,9 @@ struct OutputArgs {
     /// Progress reporting mode. Progress is always written to stderr.
     #[arg(long, value_enum, default_value_t = ProgressMode::Auto)]
     progress: ProgressMode,
+    /// Emit a proof-carrying hash certificate for each structured result.
+    #[arg(long)]
+    certificate: bool,
 }
 
 #[derive(Clone, Copy, Args)]
@@ -213,6 +245,19 @@ struct BlockArgs {
 }
 
 #[derive(Clone, Copy, Args)]
+struct SeedArgs {
+    /// K-mer length used for minimizer seeds.
+    #[arg(long, default_value_t = 15)]
+    seed_k: usize,
+    /// Number of adjacent k-mers per minimizer window.
+    #[arg(long, default_value_t = 10)]
+    seed_window: usize,
+    /// Bases to include on each side of the selected seed chain.
+    #[arg(long, default_value_t = 128)]
+    seed_flank: usize,
+}
+
+#[derive(Clone, Args)]
 struct LinearScoring {
     #[arg(long = "match", default_value_t = 2)]
     match_score: i32,
@@ -220,9 +265,15 @@ struct LinearScoring {
     mismatch_penalty: i32,
     #[arg(long, allow_hyphen_values = true, default_value_t = -2)]
     gap: i32,
+    /// Named substitution matrix to use instead of match/mismatch scoring.
+    #[arg(long, value_enum)]
+    matrix: Option<NamedMatrix>,
+    /// Custom whitespace-delimited substitution matrix file.
+    #[arg(long)]
+    matrix_file: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, Args)]
+#[derive(Clone, Args)]
 struct AffineScoring {
     #[arg(long = "match", default_value_t = 2)]
     match_score: i32,
@@ -232,6 +283,31 @@ struct AffineScoring {
     gap_open: i32,
     #[arg(long, allow_hyphen_values = true, default_value_t = -1)]
     gap_extend: i32,
+    /// Named substitution matrix to use instead of match/mismatch scoring.
+    #[arg(long, value_enum)]
+    matrix: Option<NamedMatrix>,
+    /// Custom whitespace-delimited substitution matrix file.
+    #[arg(long)]
+    matrix_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum NamedMatrix {
+    Blosum62,
+}
+
+impl NamedMatrix {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Blosum62 => "BLOSUM62",
+        }
+    }
+
+    fn scoring(self) -> SubstitutionScoring {
+        match self {
+            Self::Blosum62 => SubstitutionScoring::blosum62(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -241,6 +317,8 @@ enum OutputFormat {
     Jsonl,
     Tsv,
     Cigar,
+    Paf,
+    Sam,
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -262,6 +340,26 @@ enum EditDistanceEngine {
     AdaptiveBanded,
     /// Exact Myers bit-vector distance without traceback.
     Myers,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum AffineEngine {
+    /// Generic HCP summary-tree traceback.
+    Hcp,
+    /// Try diagonal-band affine traceback, then fall back to HCP linear-space.
+    Auto,
+    /// Exact diagonal-band affine traceback.
+    Wavefront,
+}
+
+impl AffineEngine {
+    fn backend_label(self) -> &'static str {
+        match self {
+            Self::Hcp => "hcp",
+            Self::Auto => "auto",
+            Self::Wavefront => "wavefront-affine",
+        }
+    }
 }
 
 impl EditDistanceEngine {
@@ -317,6 +415,12 @@ struct Report {
     pair_index: usize,
     query_id: String,
     target_id: String,
+    #[serde(skip)]
+    query_len: usize,
+    #[serde(skip)]
+    target_len: usize,
+    #[serde(skip)]
+    query_sequence: String,
     mode: &'static str,
     score: Option<i32>,
     distance: Option<u32>,
@@ -334,6 +438,8 @@ struct Report {
     operation_counts: Option<Vec<OperationCount>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operations: Option<Vec<hcp_dp::alignment::AlignmentStep>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    certificate: Option<AlignmentCertificate>,
     block_size: usize,
     path_length: usize,
     summary_build_ms: f64,
@@ -361,6 +467,59 @@ struct OperationCount {
     count: usize,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum ScoringParams {
+    Linear {
+        substitution: SubstitutionParams,
+        gap: i32,
+    },
+    SeededLinear {
+        substitution: SubstitutionParams,
+        gap: i32,
+        seed_k: usize,
+        seed_window: usize,
+        seed_flank: usize,
+    },
+    Affine {
+        substitution: SubstitutionParams,
+        gap_open: i32,
+        gap_extend: i32,
+    },
+    EditDistance {
+        substitution: u32,
+        insertion: u32,
+        deletion: u32,
+    },
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum SubstitutionParams {
+    MatchMismatch {
+        match_score: i32,
+        mismatch_penalty: i32,
+    },
+    Matrix {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_sha256: Option<String>,
+    },
+}
+
+#[derive(Clone, Serialize)]
+struct AlignmentCertificate {
+    version: &'static str,
+    hash_algorithm: &'static str,
+    query_sha256: String,
+    target_sha256: String,
+    parameters_sha256: String,
+    trace_sha256: Option<String>,
+    result_sha256: String,
+    certificate_sha256: String,
+}
+
+#[derive(Clone, Copy)]
 struct ReportObjective {
     score: Option<i32>,
     distance: Option<u32>,
@@ -375,6 +534,28 @@ struct ReportMetrics {
     elapsed_ms: f64,
     operation_detail: OperationDetail,
     backend: Option<&'static str>,
+    scoring: ScoringParams,
+    include_certificate: bool,
+}
+
+struct ResolvedSubstitutionScoring {
+    scoring: SubstitutionScoring,
+    params: SubstitutionParams,
+}
+
+struct ResultHashInput<'a> {
+    mode: &'static str,
+    backend: Option<&'static str>,
+    objective: ReportObjective,
+    verification: &'a VerificationResult,
+    query_start: usize,
+    query_end: usize,
+    target_start: usize,
+    target_end: usize,
+    cigar: &'a str,
+    block_size: usize,
+    path_length: usize,
+    trace_sha256: Option<&'a str>,
 }
 
 impl ReportObjective {
@@ -410,14 +591,34 @@ where
 {
     let pairs = read_pairs(&args.input)?;
     run_pairs(&pairs, &args.output, mode, |pair| {
-        align(pair, args.scoring, &args.output, args.block, mode)
+        align(pair, args.scoring.clone(), &args.output, args.block, mode)
+    })
+}
+
+fn run_seeded_linear_mode(args: SeededLinearCommand) -> Result<Vec<Report>, String> {
+    let pairs = read_pairs(&args.input)?;
+    run_pairs(&pairs, &args.output, "seeded-global-linear", |pair| {
+        align_seeded_global_linear(
+            pair,
+            args.scoring.clone(),
+            &args.output,
+            args.block,
+            args.seed,
+        )
     })
 }
 
 fn run_affine_mode(args: AffineCommand) -> Result<Vec<Report>, String> {
     let pairs = read_pairs(&args.input)?;
     run_pairs(&pairs, &args.output, "global-affine", |pair| {
-        align_global_affine(pair, args.scoring, &args.output, args.block)
+        align_global_affine(
+            pair,
+            args.scoring.clone(),
+            &args.output,
+            args.block,
+            args.engine,
+            args.wavefront_band,
+        )
     })
 }
 
@@ -545,6 +746,64 @@ fn read_pairs(args: &InputArgs) -> Result<Vec<PairInput>, String> {
         .collect())
 }
 
+fn resolve_substitution_scoring(
+    matrix: Option<NamedMatrix>,
+    matrix_file: &Option<PathBuf>,
+    match_score: i32,
+    mismatch_penalty: i32,
+) -> Result<ResolvedSubstitutionScoring, String> {
+    match (matrix, matrix_file) {
+        (Some(_), Some(_)) => Err("provide either --matrix or --matrix-file, not both".to_string()),
+        (Some(matrix), None) => Ok(ResolvedSubstitutionScoring {
+            scoring: matrix.scoring(),
+            params: SubstitutionParams::Matrix {
+                name: matrix.label().to_string(),
+                source_sha256: None,
+            },
+        }),
+        (None, Some(path)) => {
+            let text = fs::read_to_string(path)
+                .map_err(|err| format!("failed to read matrix file {}: {err}", path.display()))?;
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| !stem.is_empty())
+                .unwrap_or("custom")
+                .to_string();
+            let source_sha256 = sha256_hex(text.as_bytes());
+            let matrix = SubstitutionMatrix::from_text(name.clone(), &text)
+                .map_err(|err| format!("failed to parse matrix file {}: {err}", path.display()))?;
+            Ok(ResolvedSubstitutionScoring {
+                scoring: SubstitutionScoring::matrix(matrix),
+                params: SubstitutionParams::Matrix {
+                    name,
+                    source_sha256: Some(source_sha256),
+                },
+            })
+        }
+        (None, None) => Ok(ResolvedSubstitutionScoring {
+            scoring: SubstitutionScoring::match_mismatch(match_score, mismatch_penalty),
+            params: SubstitutionParams::MatchMismatch {
+                match_score,
+                mismatch_penalty,
+            },
+        }),
+    }
+}
+
+fn validate_substitution_inputs(
+    scoring: &SubstitutionScoring,
+    pair: &PairInput,
+) -> Result<(), String> {
+    scoring
+        .validate_sequence(&pair.query.sequence)
+        .map_err(|err| format!("query {}: {err}", pair.query.id))?;
+    scoring
+        .validate_sequence(&pair.target.sequence)
+        .map_err(|err| format!("target {}: {err}", pair.target.id))?;
+    Ok(())
+}
+
 fn align_global_linear(
     pair: &PairInput,
     scoring: LinearScoring,
@@ -553,11 +812,20 @@ fn align_global_linear(
     mode: &'static str,
 ) -> Result<Report, String> {
     let start = Instant::now();
-    let problem = NwProblem::new(
-        &pair.query.sequence,
-        &pair.target.sequence,
+    let ResolvedSubstitutionScoring {
+        scoring: substitution_scoring,
+        params: substitution,
+    } = resolve_substitution_scoring(
+        scoring.matrix,
+        &scoring.matrix_file,
         scoring.match_score,
         scoring.mismatch_penalty,
+    )?;
+    validate_substitution_inputs(&substitution_scoring, pair)?;
+    let problem = NwProblem::with_scoring(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        substitution_scoring,
         scoring.gap,
     );
     let block_size = block_size_for(&problem, block.block_size)?;
@@ -586,6 +854,83 @@ fn align_global_linear(
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
             backend: None,
+            scoring: ScoringParams::Linear {
+                substitution,
+                gap: scoring.gap,
+            },
+            include_certificate: output.certificate,
+        },
+    ))
+}
+
+fn align_seeded_global_linear(
+    pair: &PairInput,
+    scoring: LinearScoring,
+    output: &OutputArgs,
+    block: BlockArgs,
+    seed: SeedArgs,
+) -> Result<Report, String> {
+    let start = Instant::now();
+    let ResolvedSubstitutionScoring {
+        scoring: substitution_scoring,
+        params: substitution,
+    } = resolve_substitution_scoring(
+        scoring.matrix,
+        &scoring.matrix_file,
+        scoring.match_score,
+        scoring.mismatch_penalty,
+    )?;
+    validate_substitution_inputs(&substitution_scoring, pair)?;
+    let seed_window = seeded_window(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        seed.seed_k,
+        seed.seed_window,
+        seed.seed_flank,
+    )?
+    .ok_or_else(|| {
+        format!(
+            "no minimizer seed found with --seed-k {} and --seed-window {}; use smaller seed parameters or global-linear",
+            seed.seed_k, seed.seed_window
+        )
+    })?;
+    let query_slice = &pair.query.sequence[seed_window.query_start..seed_window.query_end];
+    let target_slice = &pair.target.sequence[seed_window.target_start..seed_window.target_end];
+    let problem =
+        NwProblem::with_scoring(query_slice, target_slice, substitution_scoring, scoring.gap);
+    let block_size = block_size_for(&problem, block.block_size)?;
+    let (score, path, stats) = run_engine(problem.clone(), block.block_size);
+    let verify_start = Instant::now();
+    let mut verification = verify_i32(output, pair, problem.score_path(&path), score, || {
+        problem.full_table_score()
+    });
+    verification.verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+    let trace = offset_trace(
+        AlignmentTrace::from_cells(query_slice, target_slice, &path, output.show_alignment),
+        seed_window.query_start,
+        seed_window.target_start,
+    );
+    Ok(report_from_trace(
+        pair,
+        "seeded-global-linear",
+        trace,
+        ReportMetrics {
+            objective: ReportObjective::score(score),
+            verification,
+            block_size,
+            path_length: path.len(),
+            stats,
+            elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+            operation_detail: output.operation_detail,
+            backend: Some("minimizer-seeded"),
+            scoring: ScoringParams::SeededLinear {
+                substitution,
+                gap: scoring.gap,
+                seed_k: seed.seed_k,
+                seed_window: seed.seed_window,
+                seed_flank: seed.seed_flank,
+            },
+            include_certificate: output.certificate,
         },
     ))
 }
@@ -595,18 +940,77 @@ fn align_global_affine(
     scoring: AffineScoring,
     output: &OutputArgs,
     block: BlockArgs,
+    engine: AffineEngine,
+    wavefront_band: usize,
 ) -> Result<Report, String> {
     let start = Instant::now();
-    let problem = NwAffineProblem::new(
-        &pair.query.sequence,
-        &pair.target.sequence,
+    let ResolvedSubstitutionScoring {
+        scoring: substitution_scoring,
+        params: substitution,
+    } = resolve_substitution_scoring(
+        scoring.matrix,
+        &scoring.matrix_file,
         scoring.match_score,
         scoring.mismatch_penalty,
+    )?;
+    validate_substitution_inputs(&substitution_scoring, pair)?;
+    let problem = NwAffineProblem::with_scoring(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        substitution_scoring,
         scoring.gap_open,
         scoring.gap_extend,
     );
-    let block_size = block_size_for(&problem, block.block_size)?;
-    let (score, path, stats) = run_engine(problem.clone(), block.block_size);
+    let (score, path, stats, block_size, backend) = match engine {
+        AffineEngine::Hcp => {
+            let block_size = block_size_for(&problem, block.block_size)?;
+            let (score, path, stats) = run_engine(problem.clone(), block.block_size);
+            (score, path, stats, block_size, None)
+        }
+        AffineEngine::Wavefront => {
+            if block.block_size.is_some() {
+                return Err("--block-size applies only to --engine hcp".to_string());
+            }
+            let trace_start = Instant::now();
+            let trace = trace_banded_affine(&problem, wavefront_band).ok_or_else(|| {
+                format!(
+                    "--engine wavefront did not find a path inside --wavefront-band {wavefront_band}; increase the band or use --engine hcp"
+                )
+            })?;
+            (
+                trace.score,
+                trace.path,
+                HcpRunStats {
+                    summary_build_ms: 0.0,
+                    reconstruction_ms: trace_start.elapsed().as_secs_f64() * 1000.0,
+                },
+                0,
+                Some(AffineEngine::Wavefront.backend_label()),
+            )
+        }
+        AffineEngine::Auto => {
+            if block.block_size.is_some() {
+                return Err("--block-size applies only to --engine hcp".to_string());
+            }
+            let trace_start = Instant::now();
+            if let Some(trace) = trace_banded_affine(&problem, wavefront_band) {
+                (
+                    trace.score,
+                    trace.path,
+                    HcpRunStats {
+                        summary_build_ms: 0.0,
+                        reconstruction_ms: trace_start.elapsed().as_secs_f64() * 1000.0,
+                    },
+                    0,
+                    Some(AffineEngine::Wavefront.backend_label()),
+                )
+            } else {
+                let (score, path, stats) =
+                    HcpEngine::linear_space(problem.clone()).run_with_stats();
+                (score, path, stats, 1, Some("hcp-linear"))
+            }
+        }
+    };
     let verify_start = Instant::now();
     let mut verification = verify_i32(output, pair, problem.score_path(&path), score, || {
         problem.full_table_score()
@@ -631,7 +1035,13 @@ fn align_global_affine(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
-            backend: None,
+            backend,
+            scoring: ScoringParams::Affine {
+                substitution,
+                gap_open: scoring.gap_open,
+                gap_extend: scoring.gap_extend,
+            },
+            include_certificate: output.certificate,
         },
     ))
 }
@@ -644,11 +1054,20 @@ fn align_local_linear(
     mode: &'static str,
 ) -> Result<Report, String> {
     let start = Instant::now();
-    let problem = SmithWatermanProblem::new(
-        &pair.query.sequence,
-        &pair.target.sequence,
+    let ResolvedSubstitutionScoring {
+        scoring: substitution_scoring,
+        params: substitution,
+    } = resolve_substitution_scoring(
+        scoring.matrix,
+        &scoring.matrix_file,
         scoring.match_score,
         scoring.mismatch_penalty,
+    )?;
+    validate_substitution_inputs(&substitution_scoring, pair)?;
+    let problem = SmithWatermanProblem::with_scoring(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        substitution_scoring,
         scoring.gap,
     );
     let block_size = block_size_for(&problem, block.block_size)?;
@@ -678,6 +1097,11 @@ fn align_local_linear(
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
             backend: None,
+            scoring: ScoringParams::Linear {
+                substitution,
+                gap: scoring.gap,
+            },
+            include_certificate: output.certificate,
         },
     ))
 }
@@ -801,6 +1225,12 @@ fn align_edit_distance(
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
             backend,
+            scoring: ScoringParams::EditDistance {
+                substitution: 1,
+                insertion: 1,
+                deletion: 1,
+            },
+            include_certificate: output.certificate,
         },
     ))
 }
@@ -841,6 +1271,21 @@ fn score_only_edit_distance(
         EditDistanceProblem::new(&pair.query.sequence, &pair.target.sequence).full_table_distance()
     });
     verification.verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+    let scoring = ScoringParams::EditDistance {
+        substitution: 1,
+        insertion: 1,
+        deletion: 1,
+    };
+    let certificate = output.certificate.then(|| {
+        build_score_only_certificate(
+            pair,
+            "edit-distance",
+            backend,
+            &scoring,
+            distance,
+            &verification,
+        )
+    });
 
     Ok(Report {
         schema_version: SCHEMA_VERSION,
@@ -848,6 +1293,9 @@ fn score_only_edit_distance(
         pair_index: pair.pair_index,
         query_id: pair.query.id.clone(),
         target_id: pair.target.id.clone(),
+        query_len: pair.query.sequence.len(),
+        target_len: pair.target.sequence.len(),
+        query_sequence: sequence_string(&pair.query.sequence),
         mode: "edit-distance",
         score: None,
         distance: Some(distance),
@@ -862,6 +1310,7 @@ fn score_only_edit_distance(
         backend: Some(backend),
         operation_counts: None,
         operations: None,
+        certificate,
         block_size: 0,
         path_length: 0,
         summary_build_ms: 0.0,
@@ -895,11 +1344,20 @@ fn align_semiglobal_linear(
     mode: &'static str,
 ) -> Result<Report, String> {
     let start = Instant::now();
-    let problem = SemiGlobalProblem::new(
-        &pair.query.sequence,
-        &pair.target.sequence,
+    let ResolvedSubstitutionScoring {
+        scoring: substitution_scoring,
+        params: substitution,
+    } = resolve_substitution_scoring(
+        scoring.matrix,
+        &scoring.matrix_file,
         scoring.match_score,
         scoring.mismatch_penalty,
+    )?;
+    validate_substitution_inputs(&substitution_scoring, pair)?;
+    let problem = SemiGlobalProblem::with_scoring(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        substitution_scoring,
         scoring.gap,
     );
     let block_size = block_size_for(&problem, block.block_size)?;
@@ -929,6 +1387,11 @@ fn align_semiglobal_linear(
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
             backend: None,
+            scoring: ScoringParams::Linear {
+                substitution,
+                gap: scoring.gap,
+            },
+            include_certificate: output.certificate,
         },
     ))
 }
@@ -939,6 +1402,9 @@ fn report_from_trace(
     trace: AlignmentTrace,
     metrics: ReportMetrics,
 ) -> Report {
+    let certificate = metrics
+        .include_certificate
+        .then(|| build_alignment_certificate(pair, mode, &trace, &metrics));
     let operation_counts = match metrics.operation_detail {
         OperationDetail::None => None,
         OperationDetail::Summary | OperationDetail::Full => {
@@ -955,6 +1421,9 @@ fn report_from_trace(
         pair_index: pair.pair_index,
         query_id: pair.query.id.clone(),
         target_id: pair.target.id.clone(),
+        query_len: pair.query.sequence.len(),
+        target_len: pair.target.sequence.len(),
+        query_sequence: sequence_string(&pair.query.sequence),
         mode,
         score: metrics.objective.score,
         distance: metrics.objective.distance,
@@ -969,6 +1438,7 @@ fn report_from_trace(
         backend: metrics.backend,
         operation_counts,
         operations,
+        certificate,
         block_size: metrics.block_size,
         path_length: metrics.path_length,
         summary_build_ms: metrics.stats.summary_build_ms,
@@ -996,6 +1466,245 @@ fn operation_counts(operations: &[hcp_dp::alignment::AlignmentStep]) -> Vec<Oper
     counts
 }
 
+fn build_alignment_certificate(
+    pair: &PairInput,
+    mode: &'static str,
+    trace: &AlignmentTrace,
+    metrics: &ReportMetrics,
+) -> AlignmentCertificate {
+    let trace_sha256 = trace_operations_sha256(&trace.operations);
+    let result_sha256 = result_sha256(ResultHashInput {
+        mode,
+        backend: metrics.backend,
+        objective: metrics.objective,
+        verification: &metrics.verification,
+        query_start: trace.query_start,
+        query_end: trace.query_end,
+        target_start: trace.target_start,
+        target_end: trace.target_end,
+        cigar: &trace.cigar,
+        block_size: metrics.block_size,
+        path_length: metrics.path_length,
+        trace_sha256: Some(&trace_sha256),
+    });
+    build_certificate(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        &metrics.scoring,
+        Some(trace_sha256),
+        result_sha256,
+    )
+}
+
+fn build_score_only_certificate(
+    pair: &PairInput,
+    mode: &'static str,
+    backend: &'static str,
+    scoring: &ScoringParams,
+    distance: u32,
+    verification: &VerificationResult,
+) -> AlignmentCertificate {
+    let result_sha256 = result_sha256(ResultHashInput {
+        mode,
+        backend: Some(backend),
+        objective: ReportObjective::distance(distance),
+        verification,
+        query_start: 0,
+        query_end: pair.query.sequence.len(),
+        target_start: 0,
+        target_end: pair.target.sequence.len(),
+        cigar: "",
+        block_size: 0,
+        path_length: 0,
+        trace_sha256: None,
+    });
+    build_certificate(
+        &pair.query.sequence,
+        &pair.target.sequence,
+        scoring,
+        None,
+        result_sha256,
+    )
+}
+
+fn build_certificate(
+    query: &[u8],
+    target: &[u8],
+    scoring: &ScoringParams,
+    trace_sha256: Option<String>,
+    result_sha256: String,
+) -> AlignmentCertificate {
+    let query_sha256 = sha256_hex(query);
+    let target_sha256 = sha256_hex(target);
+    let parameters_sha256 = sha256_json(scoring);
+    let certificate_sha256 = certificate_payload_sha256(
+        &query_sha256,
+        &target_sha256,
+        &parameters_sha256,
+        trace_sha256.as_deref(),
+        &result_sha256,
+    );
+    AlignmentCertificate {
+        version: "hcp-align.certificate.v1",
+        hash_algorithm: "sha256",
+        query_sha256,
+        target_sha256,
+        parameters_sha256,
+        trace_sha256,
+        result_sha256,
+        certificate_sha256,
+    }
+}
+
+fn result_sha256(input: ResultHashInput<'_>) -> String {
+    let mut hasher = Sha256::new();
+    update_field(&mut hasher, "schema_version", SCHEMA_VERSION);
+    update_field(&mut hasher, "engine", ENGINE_NAME);
+    update_field(&mut hasher, "mode", input.mode);
+    update_field(&mut hasher, "backend", input.backend.unwrap_or("hcp"));
+    update_optional_field(
+        &mut hasher,
+        "score",
+        input.objective.score.map(|value| value.to_string()),
+    );
+    update_optional_field(
+        &mut hasher,
+        "distance",
+        input.objective.distance.map(|value| value.to_string()),
+    );
+    update_optional_field(
+        &mut hasher,
+        "path_score",
+        input.verification.path_score.map(|value| value.to_string()),
+    );
+    update_field(
+        &mut hasher,
+        "verification_status",
+        input.verification.status.label(),
+    );
+    update_optional_field(
+        &mut hasher,
+        "verified",
+        input.verification.verified.map(|value| value.to_string()),
+    );
+    update_field(&mut hasher, "query_start", &input.query_start.to_string());
+    update_field(&mut hasher, "query_end", &input.query_end.to_string());
+    update_field(&mut hasher, "target_start", &input.target_start.to_string());
+    update_field(&mut hasher, "target_end", &input.target_end.to_string());
+    update_field(&mut hasher, "cigar", input.cigar);
+    update_field(&mut hasher, "block_size", &input.block_size.to_string());
+    update_field(&mut hasher, "path_length", &input.path_length.to_string());
+    update_optional_field(
+        &mut hasher,
+        "trace_sha256",
+        input.trace_sha256.map(str::to_string),
+    );
+    hex_lower(&hasher.finalize())
+}
+
+fn trace_operations_sha256(operations: &[hcp_dp::alignment::AlignmentStep]) -> String {
+    let mut hasher = Sha256::new();
+    update_field(
+        &mut hasher,
+        "operation_count",
+        &operations.len().to_string(),
+    );
+    for (idx, operation) in operations.iter().enumerate() {
+        update_field(&mut hasher, "index", &idx.to_string());
+        update_field(&mut hasher, "op", alignment_op_label(operation.op));
+        update_optional_field(
+            &mut hasher,
+            "query_pos",
+            operation.query_pos.map(|value| value.to_string()),
+        );
+        update_optional_field(
+            &mut hasher,
+            "target_pos",
+            operation.target_pos.map(|value| value.to_string()),
+        );
+        update_optional_field(
+            &mut hasher,
+            "query_base",
+            operation.query_base.map(|value| value.to_string()),
+        );
+        update_optional_field(
+            &mut hasher,
+            "target_base",
+            operation.target_base.map(|value| value.to_string()),
+        );
+    }
+    hex_lower(&hasher.finalize())
+}
+
+fn certificate_payload_sha256(
+    query_sha256: &str,
+    target_sha256: &str,
+    parameters_sha256: &str,
+    trace_sha256: Option<&str>,
+    result_sha256: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    update_field(&mut hasher, "version", "hcp-align.certificate.v1");
+    update_field(&mut hasher, "hash_algorithm", "sha256");
+    update_field(&mut hasher, "query_sha256", query_sha256);
+    update_field(&mut hasher, "target_sha256", target_sha256);
+    update_field(&mut hasher, "parameters_sha256", parameters_sha256);
+    update_optional_field(
+        &mut hasher,
+        "trace_sha256",
+        trace_sha256.map(str::to_string),
+    );
+    update_field(&mut hasher, "result_sha256", result_sha256);
+    hex_lower(&hasher.finalize())
+}
+
+fn sha256_json<T: Serialize>(value: &T) -> String {
+    let bytes = serde_json::to_vec(value).expect("certificate parameters must serialize");
+    sha256_hex(&bytes)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_lower(&hasher.finalize())
+}
+
+fn update_optional_field(hasher: &mut Sha256, key: &str, value: Option<String>) {
+    match value {
+        Some(value) => update_field(hasher, key, &value),
+        None => update_field(hasher, key, "<none>"),
+    }
+}
+
+fn update_field(hasher: &mut Sha256, key: &str, value: &str) {
+    update_bytes(hasher, key.as_bytes());
+    update_bytes(hasher, value.as_bytes());
+}
+
+fn update_bytes(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn alignment_op_label(op: AlignmentOpKind) -> &'static str {
+    match op {
+        AlignmentOpKind::Match => "match",
+        AlignmentOpKind::Mismatch => "mismatch",
+        AlignmentOpKind::GapInTarget => "gap_in_target",
+        AlignmentOpKind::GapInQuery => "gap_in_query",
+    }
+}
+
 fn error_report(pair: &PairInput, mode: &'static str, error: String) -> Report {
     Report {
         schema_version: SCHEMA_VERSION,
@@ -1003,6 +1712,9 @@ fn error_report(pair: &PairInput, mode: &'static str, error: String) -> Report {
         pair_index: pair.pair_index,
         query_id: pair.query.id.clone(),
         target_id: pair.target.id.clone(),
+        query_len: pair.query.sequence.len(),
+        target_len: pair.target.sequence.len(),
+        query_sequence: sequence_string(&pair.query.sequence),
         mode,
         score: None,
         distance: None,
@@ -1017,6 +1729,7 @@ fn error_report(pair: &PairInput, mode: &'static str, error: String) -> Report {
         backend: None,
         operation_counts: None,
         operations: None,
+        certificate: None,
         block_size: 0,
         path_length: 0,
         summary_build_ms: 0.0,
@@ -1178,6 +1891,8 @@ fn write_reports(reports: &[Report], output: &OutputArgs) -> Result<(), String> 
         OutputFormat::Text => text_reports(reports),
         OutputFormat::Tsv => tsv_reports(reports),
         OutputFormat::Cigar => cigar_reports(reports),
+        OutputFormat::Paf => paf_reports(reports)?,
+        OutputFormat::Sam => sam_reports(reports)?,
     };
     if let Some(path) = &output.output_path {
         fs::write(path, rendered)
@@ -1316,6 +2031,106 @@ fn cigar_reports(reports: &[Report]) -> String {
     output
 }
 
+fn paf_reports(reports: &[Report]) -> Result<String, String> {
+    let mut output = String::new();
+    for report in reports {
+        ensure_traceback_for_interop("PAF", report)?;
+        let stats = cigar_stats(&report.cigar)?;
+        let paf_cigar = paf_cigar_from_hcp_cigar(&report.cigar)?;
+        output.push_str(&format!(
+            "{}\t{}\t{}\t{}\t+\t{}\t{}\t{}\t{}\t{}\t{}\t255",
+            escape_tab(&report.query_id),
+            report.query_len,
+            report.query_start,
+            report.query_end,
+            escape_tab(&report.target_id),
+            report.target_len,
+            report.target_start,
+            report.target_end,
+            stats.matches,
+            stats.block_len,
+        ));
+        if let Some(score) = report.score {
+            output.push_str(&format!("\tAS:i:{score}"));
+        }
+        let nm = report
+            .distance
+            .map_or(stats.edit_ops, |distance| distance as usize);
+        output.push_str(&format!(
+            "\tNM:i:{nm}\tcg:Z:{paf_cigar}\tvs:Z:{}\tpi:i:{}",
+            report.verification_status.label(),
+            report.pair_index,
+        ));
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn sam_reports(reports: &[Report]) -> Result<String, String> {
+    let mut output = String::from("@HD\tVN:1.6\tSO:unknown\n");
+    let mut references: Vec<(&str, usize)> = Vec::new();
+    for report in reports {
+        if let Some((_, length)) = references
+            .iter()
+            .find(|(name, _)| *name == report.target_id.as_str())
+        {
+            if *length != report.target_len {
+                return Err("SAM output requires each target id to have one length".to_string());
+            }
+        } else {
+            references.push((&report.target_id, report.target_len));
+        }
+    }
+    for (name, length) in references {
+        output.push_str(&format!("@SQ\tSN:{}\tLN:{length}\n", escape_tab(name)));
+    }
+
+    for report in reports {
+        ensure_traceback_for_interop("SAM", report)?;
+        let stats = cigar_stats(&report.cigar)?;
+        let cigar = sam_cigar(report)?;
+        let pos = report.target_start + 1;
+        let seq = if report.query_sequence.is_empty() {
+            "*"
+        } else {
+            &report.query_sequence
+        };
+        output.push_str(&format!(
+            "{}\t0\t{}\t{}\t255\t{}\t*\t0\t0\t{}\t*",
+            escape_tab(&report.query_id),
+            escape_tab(&report.target_id),
+            pos,
+            cigar,
+            seq,
+        ));
+        if let Some(score) = report.score {
+            output.push_str(&format!("\tAS:i:{score}"));
+        }
+        let nm = report
+            .distance
+            .map_or(stats.edit_ops, |distance| distance as usize);
+        output.push_str(&format!(
+            "\tNM:i:{nm}\tVS:Z:{}\tPI:i:{}",
+            report.verification_status.label(),
+            report.pair_index,
+        ));
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn ensure_traceback_for_interop(format: &str, report: &Report) -> Result<(), String> {
+    if report.error.is_some() {
+        return Err(format!("{format} output cannot represent failed records"));
+    }
+    if report.path_score.is_none() {
+        return Err(format!(
+            "{format} output requires traceback; disable --score-only"
+        ));
+    }
+    Ok(())
+}
+
 fn tsv_row(report: &Report) -> String {
     format!(
         "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}",
@@ -1355,6 +2170,109 @@ fn optional_i64(value: Option<i64>) -> String {
 
 fn escape_tab(value: &str) -> String {
     value.replace(['\t', '\n', '\r'], " ")
+}
+
+fn offset_trace(
+    mut trace: AlignmentTrace,
+    query_offset: usize,
+    target_offset: usize,
+) -> AlignmentTrace {
+    trace.query_start += query_offset;
+    trace.query_end += query_offset;
+    trace.target_start += target_offset;
+    trace.target_end += target_offset;
+    for operation in &mut trace.operations {
+        if let Some(query_pos) = operation.query_pos.as_mut() {
+            *query_pos += query_offset;
+        }
+        if let Some(target_pos) = operation.target_pos.as_mut() {
+            *target_pos += target_offset;
+        }
+    }
+    trace
+}
+
+fn sequence_string(sequence: &[u8]) -> String {
+    String::from_utf8_lossy(sequence).into_owned()
+}
+
+#[derive(Default)]
+struct CigarStats {
+    matches: usize,
+    block_len: usize,
+    edit_ops: usize,
+}
+
+fn cigar_stats(cigar: &str) -> Result<CigarStats, String> {
+    let mut stats = CigarStats::default();
+    for (count, op) in cigar_runs(cigar)? {
+        match op {
+            '=' => stats.matches += count,
+            'X' | 'D' | 'I' => stats.edit_ops += count,
+            _ => return Err(format!("unsupported CIGAR operation '{op}'")),
+        }
+        stats.block_len += count;
+    }
+    Ok(stats)
+}
+
+fn paf_cigar_from_hcp_cigar(cigar: &str) -> Result<String, String> {
+    let mut output = String::new();
+    for (count, op) in cigar_runs(cigar)? {
+        let paf_op = match op {
+            '=' | 'X' => op,
+            'D' => 'I',
+            'I' => 'D',
+            _ => return Err(format!("unsupported CIGAR operation '{op}'")),
+        };
+        output.push_str(&count.to_string());
+        output.push(paf_op);
+    }
+    Ok(output)
+}
+
+fn sam_cigar(report: &Report) -> Result<String, String> {
+    let mut cigar = String::new();
+    if report.query_start > 0 {
+        cigar.push_str(&report.query_start.to_string());
+        cigar.push('S');
+    }
+    cigar.push_str(&paf_cigar_from_hcp_cigar(&report.cigar)?);
+    let suffix = report.query_len.saturating_sub(report.query_end);
+    if suffix > 0 {
+        cigar.push_str(&suffix.to_string());
+        cigar.push('S');
+    }
+    if cigar.is_empty() {
+        cigar.push('*');
+    }
+    Ok(cigar)
+}
+
+fn cigar_runs(cigar: &str) -> Result<Vec<(usize, char)>, String> {
+    let mut runs = Vec::new();
+    let mut count = 0usize;
+    let mut in_count = false;
+    for ch in cigar.chars() {
+        if let Some(digit) = ch.to_digit(10) {
+            in_count = true;
+            count = count
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(digit as usize))
+                .ok_or_else(|| "CIGAR run length overflowed usize".to_string())?;
+            continue;
+        }
+        if !in_count || count == 0 {
+            return Err(format!("invalid CIGAR run before operation '{ch}'"));
+        }
+        runs.push((count, ch));
+        count = 0;
+        in_count = false;
+    }
+    if in_count {
+        return Err("CIGAR ended with a run length but no operation".to_string());
+    }
+    Ok(runs)
 }
 
 fn affine_cells(path: &[NwAffineState]) -> Vec<(usize, usize)> {

@@ -22,7 +22,7 @@ jobs:
       - name: Run benches with baseline comparison
         env:
           RUN_BENCH: "1"
-          PERF_ENFORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enforce || '0' }}
+          PERF_ENFORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enforce || '1' }}
         run: |
           bash scripts/check.sh
       - name: Generate performance report

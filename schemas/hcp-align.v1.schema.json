@@ -40,7 +40,8 @@
         "global-affine",
         "local-linear",
         "edit-distance",
-        "semiglobal-linear"
+        "semiglobal-linear",
+        "seeded-global-linear"
       ]
     },
     "score": { "type": ["integer", "null"] },
@@ -55,7 +56,13 @@
     "cigar": { "type": "string" },
     "backend": {
       "description": "Optional problem-specific backend label. Omitted for the default HCP engine.",
-      "enum": ["hcp-linear", "adaptive-banded", "myers"]
+      "enum": [
+        "hcp-linear",
+        "adaptive-banded",
+        "myers",
+        "wavefront-affine",
+        "minimizer-seeded"
+      ]
     },
     "operation_counts": {
       "type": "array",
@@ -64,6 +71,9 @@
     "operations": {
       "type": "array",
       "items": { "$ref": "#/$defs/operation" }
+    },
+    "certificate": {
+      "$ref": "#/$defs/certificate"
     },
     "block_size": {
       "description": "HCP summary-tree block size. Non-HCP exact backends use 0.",
@@ -110,6 +120,34 @@
         "target_base": { "type": ["string", "null"], "maxLength": 1 }
       },
       "additionalProperties": false
+    },
+    "certificate": {
+      "type": "object",
+      "required": [
+        "version",
+        "hash_algorithm",
+        "query_sha256",
+        "target_sha256",
+        "parameters_sha256",
+        "trace_sha256",
+        "result_sha256",
+        "certificate_sha256"
+      ],
+      "properties": {
+        "version": { "const": "hcp-align.certificate.v1" },
+        "hash_algorithm": { "const": "sha256" },
+        "query_sha256": { "$ref": "#/$defs/sha256" },
+        "target_sha256": { "$ref": "#/$defs/sha256" },
+        "parameters_sha256": { "$ref": "#/$defs/sha256" },
+        "trace_sha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "result_sha256": { "$ref": "#/$defs/sha256" },
+        "certificate_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   }
 }

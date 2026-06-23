@@ -3,7 +3,10 @@
 //! This implementation consumes the full query (`s`) against any target (`t`)
 //! interval. Target prefix and suffix are free; query gaps remain penalized.
 
-use crate::traits::{HcpProblem, SummaryApply};
+use crate::{
+    scoring::SubstitutionScoring,
+    traits::{HcpProblem, SummaryApply},
+};
 
 #[derive(Clone)]
 pub struct SemiGlobalProblem<'a> {
@@ -12,6 +15,7 @@ pub struct SemiGlobalProblem<'a> {
     pub match_score: i32,
     pub mismatch_penalty: i32,
     pub gap_penalty: i32,
+    pub scoring: SubstitutionScoring,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,9 +36,8 @@ pub struct SemiGlobalSummary<'a> {
     t: &'a [u8],
     start: usize,
     end: usize,
-    match_score: i32,
-    mismatch_penalty: i32,
     gap_penalty: i32,
+    scoring: SubstitutionScoring,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +68,23 @@ impl<'a> SemiGlobalProblem<'a> {
             match_score,
             mismatch_penalty,
             gap_penalty,
+            scoring: SubstitutionScoring::match_mismatch(match_score, mismatch_penalty),
+        }
+    }
+
+    pub fn with_scoring(
+        s: &'a [u8],
+        t: &'a [u8],
+        scoring: SubstitutionScoring,
+        gap_penalty: i32,
+    ) -> Self {
+        Self {
+            s,
+            t,
+            match_score: 0,
+            mismatch_penalty: 0,
+            gap_penalty,
+            scoring,
         }
     }
 
@@ -109,11 +129,7 @@ impl<'a> SemiGlobalProblem<'a> {
     }
 
     fn score_pair(&self, a: u8, b: u8) -> i32 {
-        if a == b {
-            self.match_score
-        } else {
-            -self.mismatch_penalty
-        }
+        self.scoring.score(a, b)
     }
 
     fn selected_from_boundaries(
@@ -164,19 +180,12 @@ impl<'a> SemiGlobalProblem<'a> {
         let fwd = linear_last_row(
             &self.s[start.row..row],
             &self.t[p..q],
-            self.match_score,
-            self.mismatch_penalty,
+            &self.scoring,
             self.gap_penalty,
         );
         let s_rev: Vec<u8> = self.s[row..end.row].iter().rev().copied().collect();
         let t_rev: Vec<u8> = self.t[p..q].iter().rev().copied().collect();
-        let bwd = linear_last_row(
-            &s_rev,
-            &t_rev,
-            self.match_score,
-            self.mismatch_penalty,
-            self.gap_penalty,
-        );
+        let bwd = linear_last_row(&s_rev, &t_rev, &self.scoring, self.gap_penalty);
 
         let width = q - p;
         let mut best_col = p;
@@ -325,8 +334,7 @@ impl<'a> HcpProblem for SemiGlobalProblem<'a> {
         advance_semiglobal_row(
             self.s[layer],
             self.t,
-            self.match_score,
-            self.mismatch_penalty,
+            &self.scoring,
             self.gap_penalty,
             frontier,
         )
@@ -339,9 +347,8 @@ impl<'a> HcpProblem for SemiGlobalProblem<'a> {
             t: self.t,
             start: a,
             end: b,
-            match_score: self.match_score,
-            mismatch_penalty: self.mismatch_penalty,
             gap_penalty: self.gap_penalty,
+            scoring: self.scoring.clone(),
         }
     }
 
@@ -354,18 +361,15 @@ impl<'a> HcpProblem for SemiGlobalProblem<'a> {
             std::ptr::eq(left.s, right.s) && std::ptr::eq(left.t, right.t),
             "semi-global summaries must belong to the same problem"
         );
-        assert_eq!(
-            (left.match_score, left.mismatch_penalty, left.gap_penalty),
-            (right.match_score, right.mismatch_penalty, right.gap_penalty)
-        );
+        assert_eq!(left.gap_penalty, right.gap_penalty);
+        assert_eq!(left.scoring, right.scoring);
         SemiGlobalSummary {
             s: self.s,
             t: self.t,
             start: left.start,
             end: right.end,
-            match_score: self.match_score,
-            mismatch_penalty: self.mismatch_penalty,
             gap_penalty: self.gap_penalty,
+            scoring: self.scoring.clone(),
         }
     }
 
@@ -436,8 +440,7 @@ impl<'a> SummaryApply<SemiGlobalFrontier> for SemiGlobalSummary<'a> {
             current = advance_semiglobal_row(
                 self.s[layer],
                 self.t,
-                self.match_score,
-                self.mismatch_penalty,
+                &self.scoring,
                 self.gap_penalty,
                 &current,
             );
@@ -449,8 +452,7 @@ impl<'a> SummaryApply<SemiGlobalFrontier> for SemiGlobalSummary<'a> {
 fn advance_semiglobal_row(
     s_ch: u8,
     t: &[u8],
-    match_score: i32,
-    mismatch_penalty: i32,
+    scoring: &SubstitutionScoring,
     gap_penalty: i32,
     frontier: &SemiGlobalFrontier,
 ) -> SemiGlobalFrontier {
@@ -471,11 +473,7 @@ fn advance_semiglobal_row(
     starts.push(frontier.starts[0]);
 
     for col in 1..=t.len() {
-        let pair = if s_ch == t[col - 1] {
-            match_score
-        } else {
-            -mismatch_penalty
-        };
+        let pair = scoring.score(s_ch, t[col - 1]);
         let diag = SemiGlobalCandidate {
             score: frontier.scores[col - 1] + pair,
             start: frontier.starts[col - 1],
@@ -516,8 +514,7 @@ fn choose_semiglobal_cell(
 fn linear_last_row(
     x: &[u8],
     y: &[u8],
-    match_score: i32,
-    mismatch_penalty: i32,
+    scoring: &SubstitutionScoring,
     gap_penalty: i32,
 ) -> Vec<i32> {
     let mut prev = Vec::with_capacity(y.len() + 1);
@@ -530,11 +527,7 @@ fn linear_last_row(
     for &cx in x {
         curr[0] = prev[0] + gap_penalty;
         for col in 1..=y.len() {
-            let pair = if cx == y[col - 1] {
-                match_score
-            } else {
-                -mismatch_penalty
-            };
+            let pair = scoring.score(cx, y[col - 1]);
             let diag = prev[col - 1] + pair;
             let up = prev[col] + gap_penalty;
             let left = curr[col - 1] + gap_penalty;

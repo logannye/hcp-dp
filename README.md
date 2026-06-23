@@ -14,7 +14,9 @@ exact path to be reconstructed. The current alpha focuses its CLI on
 biosequence-style alignment, where correctness can be checked against
 independent baselines and the workflow is immediately useful. The Rust library
 also includes dynamic time warping as an early proof that the contract is not
-limited to sequence-alignment recurrences.
+limited to sequence-alignment recurrences, plus a sparse layered-DAG longest
+path problem as a proof point for graph-shaped frontiers and a dense Viterbi
+problem as a proof point for HMM-style dynamic programs.
 
 ## What You Can Use Today
 
@@ -25,11 +27,22 @@ limited to sequence-alignment recurrences.
 - Levenshtein score-only mode with an exact arbitrary-length Myers bit-vector
   backend for fast distance queries that do not need traceback.
 - Global Needleman-Wunsch alignment with linear gaps.
-- Global Gotoh alignment with affine gaps.
+- Global Gotoh alignment with affine gaps, including an exact diagonal-band
+  wavefront-style traceback backend.
 - Smith-Waterman local alignment with linear gaps.
 - Semi-global alignment of a full query against any target interval.
+- Minimizer-seeded exact extension with global alignment inside the selected
+  candidate window.
+- Sparse layered-DAG longest path as a library proof point for graph frontiers.
+- Dense Viterbi decoding as a library proof point for HMM-style recurrences.
+- Bit-parallel LCS length scoring for short targets, used as an optimized
+  exact baseline.
+- Match/mismatch scoring, built-in BLOSUM62, and custom substitution matrices
+  for score-based alignment modes.
 - Single-record inline input and pairwise multi-record FASTA/FASTQ batch input.
-- Text, JSON, JSONL, TSV, and compact CIGAR-style output.
+- Text, JSON, JSONL, TSV, compact CIGAR-style output, PAF, and SAM export.
+- Lightweight Python subprocess binding over the CLI JSON contract.
+- Optional SHA-256 result certificates for proof-carrying JSON/JSONL records.
 - Independent path scoring for every result, with optional full-table
   verification on bounded inputs.
 
@@ -221,6 +234,18 @@ hcp-align global-affine \
   --format json
 ```
 
+Affine low-difference alignment with the wavefront-style backend:
+
+```bash
+hcp-align global-affine \
+  --query ACGTACGT \
+  --target ACGTTACGT \
+  --engine wavefront \
+  --wavefront-band 2 \
+  --verify \
+  --format json
+```
+
 Smith-Waterman local alignment:
 
 ```bash
@@ -230,6 +255,18 @@ hcp-align local-linear \
   --match 2 \
   --mismatch-penalty 1 \
   --gap -2 \
+  --verify \
+  --format json
+```
+
+Protein alignment with BLOSUM62:
+
+```bash
+hcp-align global-linear \
+  --query MTEYK \
+  --target MTDYK \
+  --matrix blosum62 \
+  --gap -4 \
   --verify \
   --format json
 ```
@@ -248,6 +285,39 @@ hcp-align semiglobal-linear \
   --format text
 ```
 
+Minimizer-seeded exact extension:
+
+```bash
+hcp-align seeded-global-linear \
+  --query TTACGTAA \
+  --target GGACGTCC \
+  --seed-k 2 \
+  --seed-window 2 \
+  --seed-flank 1 \
+  --verify \
+  --format json
+```
+
+PAF export for pipeline interoperability:
+
+```bash
+hcp-align edit-distance \
+  --engine hcp \
+  --query ACGT \
+  --target ACGT \
+  --format paf
+```
+
+SAM export is also available for traceback-producing runs:
+
+```bash
+hcp-align edit-distance \
+  --engine hcp \
+  --query ACGT \
+  --target ACGT \
+  --format sam
+```
+
 ## Verification Model
 
 Every `hcp-align` result includes:
@@ -258,6 +328,7 @@ Every `hcp-align` result includes:
 - a CIGAR-like operation string using `=`, `X`, `D`, and `I` when traceback is
   produced,
 - `verification_status`.
+- optional `certificate` hashes with `--certificate`.
 
 With `--verify`, `hcp-align` also runs a full-table baseline when the larger
 input length is within `--verify-limit`:
@@ -313,9 +384,9 @@ public `hcp_dp::contract` checks.
 
 | Problem | Exact objective | Exact path | CLI | External validation | Caveat |
 |---|---:|---:|---:|---|---|
-| LCS | yes | yes | no | no | Library-only in this alpha. |
-| Needleman-Wunsch, linear gap | yes | yes | yes | Parasail optional | No SIMD runtime path. |
-| Needleman-Wunsch, affine gap | yes | yes | yes | Parasail optional after gap calibration | Boundary state is explicit; slower than linear modes. |
+| LCS | yes | yes | no | no | Bit-parallel short-target score baseline. |
+| Needleman-Wunsch, linear gap | yes | yes | yes | Parasail optional | Supports substitution matrices. |
+| Needleman-Wunsch, affine gap | yes | yes | yes | Parasail optional after gap calibration | HCP plus exact diagonal-band `wavefront`. |
 | Smith-Waterman, linear gap | yes | yes | yes | Parasail optional | Returns selected local traceback only. |
 | Edit distance, auto backend | yes | yes | yes | Edlib optional | Default; selects adaptive-banded traceback or HCP fallback. |
 | Edit distance, HCP traceback | yes | yes | yes | Edlib optional | Generic exact traceback engine. |
@@ -323,6 +394,9 @@ public `hcp_dp::contract` checks.
 | Edit distance, Myers bit-vector | yes | no | yes, `edit-distance --score-only` | checked internally | Exact distance only; arbitrary pattern length. |
 | Edit distance, Myers u64 | yes | no | report tool only | checked internally | Pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | no external anchor yet | Full query against any target interval. |
+| Minimizer-seeded extension | yes, windowed | yes | yes | checked internally | Exact selected window, not full-pair optimum. |
+| Layered DAG longest path | yes | yes | no | no | Sparse-frontier library proof point. |
+| Viterbi decoding | yes | yes | no | no | HMM-style library proof point. |
 | Dynamic time warping | yes | yes | no | no | Library/report proof point for non-sequence DP. |
 
 See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
@@ -336,6 +410,8 @@ See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
 - [Output schema reference](docs/output-schema.md)
 - [Sample report](docs/sample-report.md)
 - [Alpha release checklist](docs/alpha-release-checklist.md)
+- [Technology roadmap](docs/technology-roadmap.md)
+- [Python binding](bindings/python/README.md)
 
 ## Validation And Reports
 
@@ -352,6 +428,13 @@ Generate a correctness and performance report:
 
 ```bash
 python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
+```
+
+Nightly performance budgets are defined in `perf/baseline.json` and enforced by
+`.github/workflows/nightly-perf.yml`. Local bench comparison is available with:
+
+```bash
+RUN_BENCH=1 PERF_ENFORCE=1 bash scripts/check.sh
 ```
 
 The checked-in [sample report](docs/sample-report.md) is generated from a small

@@ -68,7 +68,8 @@ impl<'a> LcsProblem<'a> {
     }
 
     pub fn full_table_len(&self) -> u32 {
-        lcs_last_row(self.s, self.t).last().copied().unwrap_or(0)
+        lcs_bit_parallel_len(self.s, self.t)
+            .unwrap_or_else(|| lcs_last_row(self.s, self.t).last().copied().unwrap_or(0))
     }
 }
 
@@ -269,6 +270,34 @@ fn lcs_last_row(x: &[u8], y: &[u8]) -> Vec<u32> {
     prev
 }
 
+/// Exact bit-parallel LCS length for targets up to 128 symbols.
+pub fn lcs_bit_parallel_len(x: &[u8], y: &[u8]) -> Option<u32> {
+    if y.len() > u128::BITS as usize {
+        return None;
+    }
+    if y.is_empty() || x.is_empty() {
+        return Some(0);
+    }
+
+    let active_mask = if y.len() == u128::BITS as usize {
+        u128::MAX
+    } else {
+        (1u128 << y.len()) - 1
+    };
+    let mut peq = [0u128; 256];
+    for (idx, &byte) in y.iter().enumerate() {
+        peq[byte as usize] |= 1u128 << idx;
+    }
+
+    let mut state = 0u128;
+    for &byte in x {
+        let matches = peq[byte as usize] | state;
+        let shifted = ((state << 1) | 1) & active_mask;
+        state = matches & !(matches.wrapping_sub(shifted)) & active_mask;
+    }
+    Some(state.count_ones())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +319,49 @@ mod tests {
         assert_eq!(path.first(), Some(&(0, 0)));
         assert_eq!(path.last(), Some(&(0, 3)));
         assert_eq!(problem.score_path(&path), Some(0));
+    }
+
+    #[test]
+    fn bit_parallel_lcs_matches_rolling_row_examples() {
+        for (x, y) in [
+            (&b"ABCBDAB"[..], &b"BDCABA"[..]),
+            (&b"GATTACA"[..], &b"GCATGCU"[..]),
+            (&b"AAAA"[..], &b"TTTT"[..]),
+        ] {
+            assert_eq!(
+                lcs_bit_parallel_len(x, y),
+                Some(lcs_last_row(x, y).last().copied().unwrap_or(0))
+            );
+        }
+    }
+
+    #[test]
+    fn bit_parallel_lcs_matches_exhaustive_small_binary_strings() {
+        for x_len in 0..=6 {
+            for y_len in 0..=6 {
+                for x_bits in 0..(1usize << x_len) {
+                    for y_bits in 0..(1usize << y_len) {
+                        let x = binary_string(x_bits, x_len);
+                        let y = binary_string(y_bits, y_len);
+                        assert_eq!(
+                            lcs_bit_parallel_len(&x, &y),
+                            Some(lcs_last_row(&x, &y).last().copied().unwrap_or(0))
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn binary_string(bits: usize, len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|idx| {
+                if bits & (1usize << idx) == 0 {
+                    b'A'
+                } else {
+                    b'C'
+                }
+            })
+            .collect()
     }
 }

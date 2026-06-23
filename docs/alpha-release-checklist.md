@@ -53,7 +53,7 @@ and uploads the same correctness/performance report artifact.
 - `hcp-align` supports single-record inline inputs and multi-record FASTA/FASTQ
   file inputs.
 - Batch file mode rejects mismatched record counts.
-- `json`, `jsonl`, `tsv`, and `cigar` outputs are tested.
+- `json`, `jsonl`, `tsv`, `cigar`, `paf`, and `sam` outputs are tested.
 - Independent path scoring is always computed.
 - `--verify` reports `full`, `path_only`, or `failed` clearly.
 - JSON/JSONL includes `schema_version` and `engine`.

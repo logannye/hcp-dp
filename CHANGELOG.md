@@ -7,6 +7,31 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
+- Added `hcp-align --certificate` for opt-in SHA-256 result certificates in
+  JSON/JSONL output, covering normalized inputs, scoring parameters, trace
+  operations, result fields, and certificate payloads.
+- Added built-in BLOSUM62 and custom substitution-matrix scoring for
+  `global-linear`, `global-affine`, `local-linear`, and `semiglobal-linear`.
+- Added `--format paf` for traceback-producing alignments, including standard
+  PAF coordinates, match/block counts, `cg`, `NM`, verification, and pair-index
+  tags.
+- Added `--format sam` with `@SQ` headers, reference-oriented CIGAR, soft
+  clipping for local alignments, and score/edit-distance tags.
+- Added `global-affine --engine wavefront` for exact diagonal-band affine
+  traceback, plus `--engine auto` fallback to HCP linear-space traceback.
+- Added `seeded-global-linear`, a minimizer-seeded exact extension mode that
+  chains shared k-mer seeds, expands the candidate window, and runs exact
+  Needleman-Wunsch traceback inside that window.
+- Added `problems::dag::LayeredDagProblem`, a sparse-frontier longest-path
+  proof point with HCP contract tests.
+- Added `problems::viterbi::ViterbiProblem`, a dense HMM-style Viterbi
+  traceback proof point with HCP contract tests.
+- Added exact bit-parallel LCS length scoring for targets up to 128 symbols,
+  with exhaustive small-case tests and use in `LcsProblem::full_table_len`.
+- Added `bindings/python/hcp_align.py`, a lightweight Python wrapper around the
+  `hcp-align --format json` CLI contract.
+- Populated `perf/baseline.json` and tightened `scripts/check_bench.py` so
+  nightly perf runs enforce representative Criterion median budgets.
 - Added exact adaptive-banded edit-distance traceback for low-edit-distance
   inputs, exposed through `hcp-align edit-distance --engine adaptive-banded`.
 - Added default `hcp-align edit-distance --engine auto` selection, which tries a

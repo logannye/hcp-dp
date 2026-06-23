@@ -8,17 +8,24 @@ BASELINE_PATH = Path("perf/baseline.json")
 CRITERION_DIR = Path("target/criterion")
 
 def load_baseline():
+    enforce = os.environ.get("PERF_ENFORCE", "0") == "1"
     if not BASELINE_PATH.exists():
         print(f"[perf] baseline file {BASELINE_PATH} not found; skipping comparison", file=sys.stderr)
+        if enforce:
+            raise SystemExit(1)
         return {}
     with BASELINE_PATH.open() as fh:
         try:
             data = json.load(fh)
         except json.JSONDecodeError as exc:
             print(f"[perf] failed to parse baseline: {exc}", file=sys.stderr)
+            if enforce:
+                raise SystemExit(1)
             return {}
     if not isinstance(data, dict):
         print("[perf] baseline not a dict; skipping", file=sys.stderr)
+        if enforce:
+            raise SystemExit(1)
         return {}
     return data
 
@@ -33,31 +40,40 @@ def load_estimate(bench_key):
 
 def compare():
     baseline = load_baseline()
+    enforce = os.environ.get("PERF_ENFORCE", "0") == "1"
     if not baseline:
+        if enforce:
+            print("[perf] PERF_ENFORCE=1 requires a non-empty baseline", file=sys.stderr)
+            return 1
         return 0
 
     tolerance = float(os.environ.get("PERF_TOLERANCE", "0.10"))
-    enforce = os.environ.get("PERF_ENFORCE", "0") == "1"
     failures = []
 
     for bench_key, metrics in baseline.items():
         estimate = load_estimate(bench_key)
         if estimate is None:
+            if enforce:
+                failures.append(f"{bench_key}: missing Criterion estimate")
             continue
         new_median = estimate.get("median", {}).get("point_estimate")
         if new_median is None:
             print(f"[perf] median not found for {bench_key}", file=sys.stderr)
+            if enforce:
+                failures.append(f"{bench_key}: median estimate missing")
             continue
         base_median = metrics.get("median")
         if not base_median:
             print(f"[perf] baseline median missing for {bench_key}", file=sys.stderr)
+            if enforce:
+                failures.append(f"{bench_key}: baseline median missing")
             continue
-        diff = abs(new_median - base_median) / base_median
-        if diff > tolerance:
-            msg = f"{bench_key}: median {new_median:.3e} vs baseline {base_median:.3e} (diff {diff:.2%})"
+        slowdown = (new_median - base_median) / base_median
+        if slowdown > tolerance:
+            msg = f"{bench_key}: median {new_median:.3e} vs budget {base_median:.3e} (slowdown {slowdown:.2%})"
             failures.append(msg)
         else:
-            print(f"[perf] OK {bench_key}: {diff:.2%} within tolerance", file=sys.stderr)
+            print(f"[perf] OK {bench_key}: slowdown {slowdown:.2%} within tolerance", file=sys.stderr)
 
     if failures:
         print("[perf] regressions detected:", file=sys.stderr)
@@ -70,5 +86,4 @@ def compare():
 
 if __name__ == "__main__":
     sys.exit(compare())
-
 

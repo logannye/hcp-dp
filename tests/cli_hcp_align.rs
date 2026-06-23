@@ -68,6 +68,13 @@ fn normalize_tsv_timings(text: &str) -> String {
         .join("\n")
 }
 
+fn assert_sha256(value: &Value) {
+    let text = value.as_str().expect("hash field must be a string");
+    assert_eq!(text.len(), 64);
+    assert!(text.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_eq!(text, text.to_ascii_lowercase());
+}
+
 #[test]
 fn version_flag_reports_package_version() {
     let output = run(&["--version"]);
@@ -333,6 +340,277 @@ fn output_flag_writes_to_file() {
         serde_json::from_str(&fs::read_to_string(output_path).expect("output readable"))
             .expect("valid json");
     assert_eq!(parsed["distance"], 3);
+}
+
+#[test]
+fn certificate_output_hashes_trace_and_result() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--verify",
+        "--block-size",
+        "1",
+        "--format",
+        "json",
+        "--certificate",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    let certificate = &json["certificate"];
+    assert_eq!(certificate["version"], "hcp-align.certificate.v1");
+    assert_eq!(certificate["hash_algorithm"], "sha256");
+    assert_sha256(&certificate["query_sha256"]);
+    assert_sha256(&certificate["target_sha256"]);
+    assert_sha256(&certificate["parameters_sha256"]);
+    assert_sha256(&certificate["trace_sha256"]);
+    assert_sha256(&certificate["result_sha256"]);
+    assert_sha256(&certificate["certificate_sha256"]);
+}
+
+#[test]
+fn score_only_certificate_has_no_trace_hash() {
+    let output = run(&[
+        "edit-distance",
+        "--score-only",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--format",
+        "json",
+        "--certificate",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    let certificate = &json["certificate"];
+    assert_eq!(json["backend"], "myers");
+    assert!(json["path_score"].is_null());
+    assert!(certificate["trace_sha256"].is_null());
+    assert_sha256(&certificate["query_sha256"]);
+    assert_sha256(&certificate["target_sha256"]);
+    assert_sha256(&certificate["parameters_sha256"]);
+    assert_sha256(&certificate["result_sha256"]);
+    assert_sha256(&certificate["certificate_sha256"]);
+}
+
+#[test]
+fn named_matrix_scores_protein_alignment() {
+    let output = run(&[
+        "global-linear",
+        "--query",
+        "W",
+        "--target",
+        "W",
+        "--matrix",
+        "blosum62",
+        "--gap",
+        "-4",
+        "--verify",
+        "--format",
+        "json",
+        "--certificate",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["score"], 11);
+    assert_eq!(json["path_score"], 11);
+    assert_eq!(json["verification_status"], "full");
+    assert_sha256(&json["certificate"]["parameters_sha256"]);
+}
+
+#[test]
+fn custom_matrix_file_scores_alignment() {
+    let matrix = temp_file(
+        "toy-matrix",
+        "
+          A C
+        A 2 3
+        C 3 2
+        ",
+    );
+    let output = run(&[
+        "global-linear",
+        "--query",
+        "A",
+        "--target",
+        "C",
+        "--matrix-file",
+        matrix.to_str().unwrap(),
+        "--gap",
+        "-5",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["score"], 3);
+    assert_eq!(json["path_score"], 3);
+    assert_eq!(json["cigar"], "1X");
+}
+
+#[test]
+fn matrix_symbol_validation_reports_record_context() {
+    let output = run(&[
+        "global-linear",
+        "--query",
+        "J",
+        "--target",
+        "A",
+        "--matrix",
+        "blosum62",
+    ]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("query query"), "{err}");
+    assert!(err.contains("BLOSUM62"), "{err}");
+    assert!(err.contains("symbol 'J'"), "{err}");
+}
+
+#[test]
+fn matrix_sources_are_mutually_exclusive() {
+    let matrix = temp_file("toy-matrix-conflict", "A\nA 1\n");
+    let output = run(&[
+        "global-linear",
+        "--query",
+        "A",
+        "--target",
+        "A",
+        "--matrix",
+        "blosum62",
+        "--matrix-file",
+        matrix.to_str().unwrap(),
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("provide either --matrix or --matrix-file"));
+}
+
+#[test]
+fn global_affine_wavefront_engine_returns_verified_path() {
+    let output = run(&[
+        "global-affine",
+        "--query",
+        "ACGTACGT",
+        "--target",
+        "ACGTTACGT",
+        "--engine",
+        "wavefront",
+        "--wavefront-band",
+        "2",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["score"], 12);
+    assert_eq!(json["path_score"], 12);
+    assert_eq!(json["verification_status"], "full");
+    assert_eq!(json["backend"], "wavefront-affine");
+    assert_eq!(json["block_size"], 0);
+}
+
+#[test]
+fn global_affine_auto_falls_back_when_wavefront_band_is_too_narrow() {
+    let output = run(&[
+        "global-affine",
+        "--query",
+        "AAAA",
+        "--target",
+        "AAAATTTT",
+        "--engine",
+        "auto",
+        "--wavefront-band",
+        "2",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["score"], 1);
+    assert_eq!(json["path_score"], 1);
+    assert_eq!(json["verification_status"], "full");
+    assert_eq!(json["backend"], "hcp-linear");
+    assert_eq!(json["block_size"], 1);
+}
+
+#[test]
+fn global_affine_wavefront_reports_too_narrow_band() {
+    let output = run(&[
+        "global-affine",
+        "--query",
+        "AAAA",
+        "--target",
+        "AAAATTTT",
+        "--engine",
+        "wavefront",
+        "--wavefront-band",
+        "2",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("did not find a path inside --wavefront-band 2"));
+}
+
+#[test]
+fn seeded_global_linear_aligns_exact_seed_window() {
+    let output = run(&[
+        "seeded-global-linear",
+        "--query",
+        "TTACGTAA",
+        "--target",
+        "GGACGTCC",
+        "--seed-k",
+        "2",
+        "--seed-window",
+        "2",
+        "--seed-flank",
+        "1",
+        "--match",
+        "2",
+        "--mismatch-penalty",
+        "1",
+        "--gap",
+        "-2",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
+    assert_eq!(json["mode"], "seeded-global-linear");
+    assert_eq!(json["score"], 6);
+    assert_eq!(json["path_score"], 6);
+    assert_eq!(json["verification_status"], "full");
+    assert_eq!(json["query_start"], 1);
+    assert_eq!(json["query_end"], 7);
+    assert_eq!(json["target_start"], 1);
+    assert_eq!(json["target_end"], 7);
+    assert_eq!(json["cigar"], "1X4=1X");
+    assert_eq!(json["backend"], "minimizer-seeded");
+}
+
+#[test]
+fn seeded_global_linear_reports_missing_seed() {
+    let output = run(&[
+        "seeded-global-linear",
+        "--query",
+        "AAAA",
+        "--target",
+        "CCCC",
+        "--seed-k",
+        "2",
+        "--seed-window",
+        "2",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("no minimizer seed found"));
 }
 
 #[test]
@@ -780,4 +1058,150 @@ fn tsv_and_cigar_outputs_have_stable_golden_contracts() {
         stdout(&cigar).trim_end(),
         "pair_index\tquery_id\ttarget_id\tmode\tscore\tdistance\tpath_score\tverification_status\tquery_start\tquery_end\ttarget_start\ttarget_end\tcigar\n0\tquery\ttarget\tedit-distance\t\t0\t0\tfull\t0\t4\t0\t4\t4="
     );
+}
+
+#[test]
+fn paf_output_has_stable_golden_contract() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--verify",
+        "--block-size",
+        "1",
+        "--format",
+        "paf",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim_end(),
+        "query\t4\t0\t4\t+\ttarget\t4\t0\t4\t4\t4\t255\tNM:i:0\tcg:Z:4=\tvs:Z:full\tpi:i:0"
+    );
+}
+
+#[test]
+fn paf_cigar_uses_reference_oriented_indel_symbols() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp",
+        "--query",
+        "AC",
+        "--target",
+        "A",
+        "--block-size",
+        "1",
+        "--format",
+        "paf",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim_end(),
+        "query\t2\t0\t2\t+\ttarget\t1\t0\t1\t1\t2\t255\tNM:i:1\tcg:Z:1=1I\tvs:Z:path_only\tpi:i:0"
+    );
+}
+
+#[test]
+fn paf_rejects_score_only_records() {
+    let output = run(&[
+        "edit-distance",
+        "--score-only",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--format",
+        "paf",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("PAF output requires traceback"));
+}
+
+#[test]
+fn sam_output_has_stable_golden_contract() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--verify",
+        "--block-size",
+        "1",
+        "--format",
+        "sam",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim_end(),
+        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:4\nquery\t0\ttarget\t1\t255\t4=\t*\t0\t0\tACGT\t*\tNM:i:0\tVS:Z:full\tPI:i:0"
+    );
+}
+
+#[test]
+fn sam_cigar_uses_reference_oriented_indel_symbols() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp",
+        "--query",
+        "AC",
+        "--target",
+        "A",
+        "--block-size",
+        "1",
+        "--format",
+        "sam",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim_end(),
+        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:1\nquery\t0\ttarget\t1\t255\t1=1I\t*\t0\t0\tAC\t*\tNM:i:1\tVS:Z:path_only\tPI:i:0"
+    );
+}
+
+#[test]
+fn sam_cigar_soft_clips_unaligned_query_bases() {
+    let output = run(&[
+        "local-linear",
+        "--query",
+        "TTAC",
+        "--target",
+        "AC",
+        "--match",
+        "2",
+        "--mismatch-penalty",
+        "1",
+        "--gap",
+        "-2",
+        "--format",
+        "sam",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim_end(),
+        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:2\nquery\t0\ttarget\t1\t255\t2S2=\t*\t0\t0\tTTAC\t*\tAS:i:4\tNM:i:0\tVS:Z:path_only\tPI:i:0"
+    );
+}
+
+#[test]
+fn sam_rejects_score_only_records() {
+    let output = run(&[
+        "edit-distance",
+        "--score-only",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--format",
+        "sam",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("SAM output requires traceback"));
 }

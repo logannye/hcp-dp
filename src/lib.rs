@@ -33,6 +33,8 @@ pub mod builder;
 pub mod contract;
 pub mod engine;
 pub mod problems;
+pub mod scoring;
+pub mod seeding;
 pub mod traits;
 pub mod utils;
 

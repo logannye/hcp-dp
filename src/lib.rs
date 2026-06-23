@@ -1,7 +1,7 @@
 //! Exact traceback from height-compressed dynamic-programming summaries.
 //!
-//! This crate provides a generic summary-tree engine plus correctness-tested
-//! sequence-alignment kernels plus a small dynamic-time-warping implementation.
+//! This crate provides a generic summary-tree engine, correctness-tested
+//! sequence-alignment kernels, and a small dynamic-time-warping implementation.
 //! The public surface is intentionally small while each exported problem is
 //! proven against the same contract:
 //!
@@ -22,11 +22,15 @@
 //! in report tooling to make the generic HCP traceback engine's tradeoffs
 //! visible against specialized frontier algorithms.
 //!
+//! The [`contract`] module exposes reusable bounded-test helpers for authors of
+//! new [`HcpProblem`] implementations.
+//!
 //! See the repository README and `docs/design.md` for the technical overview.
 
 pub mod alignment;
 pub mod blocks;
 pub mod builder;
+pub mod contract;
 pub mod engine;
 pub mod problems;
 pub mod traits;

@@ -120,6 +120,21 @@ the local optimum for those endpoints.
     - independent path score equals reported objective,
     - baseline objective equals HCP objective.
 
+    The crate exposes reusable helpers for small bounded cases:
+
+    ```rust
+    use hcp_dp::contract::{
+        assert_all_summary_laws, assert_engine_paths_for_all_block_sizes,
+        reconstruct_top_split,
+    };
+    ```
+
+    Use `assert_all_summary_laws(&problem)` to exhaustively check summary
+    application and merge on tiny instances, `reconstruct_top_split` to smoke
+    test endpoint-constrained split reconstruction, and
+    `assert_engine_paths_for_all_block_sizes` to verify every block size against
+    an independent path scorer and baseline.
+
 ## Boundary Pitfalls
 
 Most correctness bugs in this architecture are boundary bugs.
@@ -158,6 +173,7 @@ After correctness is established, optimize one piece at a time:
 
 - `src/problems/edit_distance.rs`: simple minimization grid with exact traceback
   plus specialized score/path backends.
+- `src/contract.rs`: reusable bounded-test helpers for problem authors.
 - `src/problems/nw_affine.rs`: stateful boundaries for affine gaps.
 - `src/problems/smith_waterman.rs`: local alignment with variable start/end.
 - `src/problems/semiglobal.rs`: free target prefix/suffix semantics.

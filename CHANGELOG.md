@@ -23,6 +23,8 @@ the alpha release when they improve correctness or clarity.
   problem, with contract tests and `scale_probe` coverage.
 - Added `docs/problem-author-guide.md` for implementing new problems against
   the interval-summary and endpoint-constrained traceback contract.
+- Added public `contract` validation helpers for downstream `HcpProblem`
+  implementations.
 - Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
   traceback runs.
 - Polished README, CLI docs, capability matrix, output schema, and package

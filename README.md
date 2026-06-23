@@ -282,6 +282,7 @@ implementations:
 - `HcpProblem`
 - `SummaryApply`
 - `alignment::AlignmentTrace`
+- `contract` validation helpers for custom `HcpProblem` tests
 - `problems::dtw::DtwProblem`
 - `problems::edit_distance::EditDistanceProblem`
 - `problems::lcs::LcsProblem`
@@ -396,6 +397,11 @@ modules:
 
 If the proof is incomplete, keep the module private or behind an experimental
 feature.
+
+The crate exposes reusable bounded-test helpers under `hcp_dp::contract` for
+summary laws, top-level split reconstruction, and all-block-size path checks.
+See the [problem author guide](docs/problem-author-guide.md) for the expected
+test pattern.
 
 ## License
 

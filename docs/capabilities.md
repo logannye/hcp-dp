@@ -29,6 +29,10 @@ Exported problems are expected to satisfy:
 - independent path-realized objective equals reported objective,
 - full-table baseline equals HCP result where applicable.
 
+For downstream problem authors, the crate exposes reusable bounded-test helpers
+under `hcp_dp::contract` for summary laws, split reconstruction, and
+all-block-size path validation.
+
 ## Validation Artifacts
 
 Default CI is network-independent. Optional external validation is available via:

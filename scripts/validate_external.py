@@ -173,6 +173,17 @@ def parasail_matrix(parasail, case: LinearCase | AffineCase):
     return parasail.matrix_create(alphabet_for(case.query, case.target), case.match, -case.mismatch)
 
 
+def parasail_linear_gap(case: LinearCase) -> tuple[int, int]:
+    """Translate HCP's linear per-position gap score to Parasail open/extend penalties."""
+    gap = abs(case.gap)
+    return gap, gap
+
+
+def parasail_affine_gap(case: AffineCase) -> tuple[int, int]:
+    """Translate HCP's first-gap open+extend convention to Parasail's open-only first gap."""
+    return abs(case.gap_open + case.gap_extend), abs(case.gap_extend)
+
+
 def hcp_linear(case: LinearCase, mode: str) -> int:
     payload = run_hcp(
         [
@@ -224,9 +235,10 @@ def validate_parasail(required: bool) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for case in LINEAR_CASES:
         matrix = parasail_matrix(parasail, case)
+        open_penalty, extend_penalty = parasail_linear_gap(case)
         hcp_score = hcp_linear(case, "global-linear")
         external_score = parasail.nw_scan_16(
-            case.query, case.target, 0, abs(case.gap), matrix
+            case.query, case.target, open_penalty, extend_penalty, matrix
         ).score
         results.append(compare("parasail", "global-linear", case.name, hcp_score, external_score))
 
@@ -235,12 +247,13 @@ def validate_parasail(required: bool) -> list[dict[str, Any]]:
     if affine_ready:
         for case in AFFINE_CASES:
             matrix = parasail_matrix(parasail, case)
+            open_penalty, extend_penalty = parasail_affine_gap(case)
             hcp_score = hcp_affine(case)
             external_score = parasail.nw_scan_16(
                 case.query,
                 case.target,
-                abs(case.gap_open),
-                abs(case.gap_extend),
+                open_penalty,
+                extend_penalty,
                 matrix,
             ).score
             results.append(compare("parasail", "global-affine", case.name, hcp_score, external_score))
@@ -259,9 +272,10 @@ def validate_parasail(required: bool) -> list[dict[str, Any]]:
 
     for case in LOCAL_CASES:
         matrix = parasail_matrix(parasail, case)
+        open_penalty, extend_penalty = parasail_linear_gap(case)
         hcp_score = hcp_linear(case, "local-linear")
         external_score = parasail.sw_scan_16(
-            case.query, case.target, 0, abs(case.gap), matrix
+            case.query, case.target, open_penalty, extend_penalty, matrix
         ).score
         results.append(compare("parasail", "local-linear", case.name, hcp_score, external_score))
 
@@ -277,12 +291,13 @@ def calibrate_parasail_affine(parasail) -> tuple[bool, list[dict[str, Any]]]:
     ok = True
     for case in cases:
         matrix = parasail_matrix(parasail, case)
+        open_penalty, extend_penalty = parasail_affine_gap(case)
         hcp_score = hcp_affine(case)
         external_score = parasail.nw_scan_16(
             case.query,
             case.target,
-            abs(case.gap_open),
-            abs(case.gap_extend),
+            open_penalty,
+            extend_penalty,
             matrix,
         ).score
         item = compare("parasail", "global-affine-calibration", case.name, hcp_score, external_score)

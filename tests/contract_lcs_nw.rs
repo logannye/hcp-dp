@@ -386,6 +386,26 @@ fn smith_waterman_edge_cases_hold() {
 }
 
 #[test]
+fn smith_waterman_optimized_split_regressions_hold() {
+    type SwCase<'a> = (&'a [u8], &'a [u8], i32, i32, i32);
+    let cases: &[SwCase<'_>] = &[
+        (b"TTACGTAA", b"GGACGTCC", 2, 1, -2),
+        (b"TTTTTACGT", b"ACGT", 2, 1, -2),
+        (b"ACGTTTTTTT", b"ACGT", 2, 1, -2),
+        (b"AAAAAA", b"AAA", 1, 1, -1),
+    ];
+
+    for (s, t, match_score, mismatch_penalty, gap_penalty) in cases {
+        let problem =
+            SmithWatermanProblem::new(s, t, *match_score, *mismatch_penalty, *gap_penalty);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_sw_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
 fn edit_distance_edge_cases_hold() {
     let cases: &[(&[u8], &[u8])] = &[
         (b"", b""),
@@ -419,6 +439,25 @@ fn semiglobal_edge_cases_hold() {
         (b"ACGTAC", b"GGACGT", 2, 1, -2),
         (b"GGGG", b"TTTT", 1, 1, -2),
         (b"ACGT", b"ACGT", 2, 1, -2),
+    ];
+
+    for (s, t, match_score, mismatch_penalty, gap_penalty) in cases {
+        let problem = SemiGlobalProblem::new(s, t, *match_score, *mismatch_penalty, *gap_penalty);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_semiglobal_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
+fn semiglobal_optimized_split_regressions_hold() {
+    type SemiCase<'a> = (&'a [u8], &'a [u8], i32, i32, i32);
+    let cases: &[SemiCase<'_>] = &[
+        (b"ACGT", b"TTACGTTT", 2, 1, -2),
+        (b"AAAAAACCCCCC", b"TTAAAAAATTT", 2, 1, -2),
+        (b"ACGTACGT", b"TTACGTGGACGTTT", 2, 1, -2),
+        (b"AAAAAA", b"TTAAAATT", 1, 1, -1),
     ];
 
     for (s, t, match_score, mismatch_penalty, gap_penalty) in cases {

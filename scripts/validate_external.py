@@ -8,18 +8,107 @@ import importlib
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPORT_DIR = ROOT / "target" / "hcp-dp-report"
+REPORT_PATH = REPORT_DIR / "external-validation.json"
 
 
-def run_hcp(args: list[str]) -> dict:
-    cmd = ["cargo", "run", "--quiet", "--bin", "hcp-align", "--", *args, "--verify", "--format", "json"]
+@dataclass(frozen=True)
+class LinearCase:
+    name: str
+    query: str
+    target: str
+    match: int = 2
+    mismatch: int = 1
+    gap: int = -2
+
+
+@dataclass(frozen=True)
+class AffineCase:
+    name: str
+    query: str
+    target: str
+    match: int = 2
+    mismatch: int = 1
+    gap_open: int = -3
+    gap_extend: int = -1
+
+
+@dataclass(frozen=True)
+class EditCase:
+    name: str
+    query: str
+    target: str
+
+
+LINEAR_CASES = [
+    LinearCase("exact_match", "ACGTACGT", "ACGTACGT"),
+    LinearCase("all_mismatches", "AAAAAA", "TTTTTT"),
+    LinearCase("long_deletion", "ACGTACGTACGT", "ACGT"),
+    LinearCase("long_insertion", "ACGT", "ACGTACGTACGT"),
+    LinearCase("homopolymer", "AAAAAAA", "AAA"),
+    LinearCase("repeats", "ATATATAT", "TATATA"),
+    LinearCase("skewed_lengths", "ACGTAC", "ACGTACGTACGT"),
+    LinearCase("tie_heavy", "AAAA", "AA", 1, 1, -1),
+    LinearCase("classic_global", "GATTACA", "GCATGCU", 1, 1, -1),
+]
+
+LOCAL_CASES = [
+    LinearCase("classic_local", "ACACACTA", "AGCACACA"),
+    LinearCase("starts_after_split", "TTTTACGT", "ACGT"),
+    LinearCase("ends_before_split", "ACGTAAAA", "ACGT"),
+    LinearCase("repeats", "ATATATAT", "TATATA"),
+    LinearCase("tie_heavy", "AAAA", "AA", 1, 1, -1),
+]
+
+AFFINE_CASES = [
+    AffineCase("regression_two_gap", "ACB", "A"),
+    AffineCase("one_position_gap", "AC", "A"),
+    AffineCase("two_position_gap", "ACB", "A"),
+    AffineCase("long_deletion", "ACGTACGTACGT", "ACGT"),
+    AffineCase("long_insertion", "ACGT", "ACGTACGTACGT"),
+    AffineCase("homopolymer", "AAAAAAA", "AAA"),
+    AffineCase("repeats", "ATATATAT", "TATATA"),
+    AffineCase("tie_heavy", "AAAA", "AA", 1, 1, -3, -1),
+]
+
+EDIT_CASES = [
+    EditCase("kitten_sitting", "kitten", "sitting"),
+    EditCase("exact_match", "ACGTACGT", "ACGTACGT"),
+    EditCase("all_mismatches", "AAAAAA", "TTTTTT"),
+    EditCase("long_deletion", "ACGTACGTACGT", "ACGT"),
+    EditCase("long_insertion", "ACGT", "ACGTACGTACGT"),
+    EditCase("homopolymer", "AAAAAAA", "AAA"),
+    EditCase("repeats", "ATATATAT", "TATATA"),
+    EditCase("skewed_lengths", "ACGTAC", "ACGTACGTACGT"),
+]
+
+
+def run_hcp(args: list[str]) -> dict[str, Any]:
+    cmd = [
+        "cargo",
+        "run",
+        "--quiet",
+        "--bin",
+        "hcp-align",
+        "--",
+        *args,
+        "--verify",
+        "--format",
+        "json",
+    ]
     proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(f"hcp-align failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
-    return json.loads(proc.stdout)
+    parsed = json.loads(proc.stdout)
+    if isinstance(parsed, list):
+        raise RuntimeError("validate_external scenarios must produce single-record JSON objects")
+    return parsed
 
 
 def load_optional(name: str, required: bool):
@@ -32,96 +121,196 @@ def load_optional(name: str, required: bool):
         return None
 
 
-def parasail_matrix(parasail, alphabet: str, match: int, mismatch_penalty: int):
-    return parasail.matrix_create(alphabet, match, -mismatch_penalty)
+def result(
+    *,
+    tool: str,
+    mode: str,
+    case: str,
+    status: str,
+    hcp: int | None = None,
+    external: int | None = None,
+    detail: str = "",
+) -> dict[str, Any]:
+    return {
+        "tool": tool,
+        "mode": mode,
+        "case": case,
+        "status": status,
+        "hcp": hcp,
+        "external": external,
+        "detail": detail,
+    }
 
 
-def validate_parasail(required: bool) -> list[str]:
+def compare(tool: str, mode: str, case: str, hcp_value: int, external_value: int) -> dict[str, Any]:
+    if hcp_value == external_value:
+        print(f"[external] OK {tool} {mode} {case}: {hcp_value}")
+        return result(
+            tool=tool,
+            mode=mode,
+            case=case,
+            status="passed",
+            hcp=hcp_value,
+            external=external_value,
+        )
+    return result(
+        tool=tool,
+        mode=mode,
+        case=case,
+        status="failed",
+        hcp=hcp_value,
+        external=external_value,
+        detail="score mismatch",
+    )
+
+
+def alphabet_for(*values: str) -> str:
+    alphabet = "".join(sorted(set("".join(values))))
+    return alphabet or "ACGT"
+
+
+def parasail_matrix(parasail, case: LinearCase | AffineCase):
+    return parasail.matrix_create(alphabet_for(case.query, case.target), case.match, -case.mismatch)
+
+
+def hcp_linear(case: LinearCase, mode: str) -> int:
+    payload = run_hcp(
+        [
+            mode,
+            "--query",
+            case.query,
+            "--target",
+            case.target,
+            "--match",
+            str(case.match),
+            "--mismatch-penalty",
+            str(case.mismatch),
+            "--gap",
+            str(case.gap),
+        ]
+    )
+    return int(payload["score"])
+
+
+def hcp_affine(case: AffineCase) -> int:
+    payload = run_hcp(
+        [
+            "global-affine",
+            "--query",
+            case.query,
+            "--target",
+            case.target,
+            "--match",
+            str(case.match),
+            "--mismatch-penalty",
+            str(case.mismatch),
+            "--gap-open",
+            str(case.gap_open),
+            "--gap-extend",
+            str(case.gap_extend),
+        ]
+    )
+    return int(payload["score"])
+
+
+def validate_parasail(required: bool) -> list[dict[str, Any]]:
     parasail = load_optional("parasail", required)
     if parasail is None:
-        return []
+        return [
+            result(tool="parasail", mode=mode, case="all", status="skipped", detail="package not installed")
+            for mode in ("global-linear", "global-affine", "local-linear")
+        ]
 
-    failures: list[str] = []
+    results: list[dict[str, Any]] = []
+    for case in LINEAR_CASES:
+        matrix = parasail_matrix(parasail, case)
+        hcp_score = hcp_linear(case, "global-linear")
+        external_score = parasail.nw_scan_16(
+            case.query, case.target, 0, abs(case.gap), matrix
+        ).score
+        results.append(compare("parasail", "global-linear", case.name, hcp_score, external_score))
 
-    linear = run_hcp([
-        "global-linear",
-        "--query",
-        "GATTACA",
-        "--target",
-        "GCATGCU",
-        "--match",
-        "1",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-1",
-    ])
-    matrix = parasail_matrix(parasail, "ACGTU", 1, 1)
-    parasail_score = parasail.nw_scan_16("GATTACA", "GCATGCU", 0, 1, matrix).score
-    compare("parasail global-linear", linear["score"], parasail_score, failures)
+    affine_ready, calibration = calibrate_parasail_affine(parasail)
+    results.extend(calibration)
+    if affine_ready:
+        for case in AFFINE_CASES:
+            matrix = parasail_matrix(parasail, case)
+            hcp_score = hcp_affine(case)
+            external_score = parasail.nw_scan_16(
+                case.query,
+                case.target,
+                abs(case.gap_open),
+                abs(case.gap_extend),
+                matrix,
+            ).score
+            results.append(compare("parasail", "global-affine", case.name, hcp_score, external_score))
+    else:
+        status = "failed" if required else "skipped"
+        for case in AFFINE_CASES:
+            results.append(
+                result(
+                    tool="parasail",
+                    mode="global-affine",
+                    case=case.name,
+                    status=status,
+                    detail="affine gap convention did not match calibration cases",
+                )
+            )
 
-    affine = run_hcp([
-        "global-affine",
-        "--query",
-        "ACB",
-        "--target",
-        "A",
-        "--match",
-        "2",
-        "--mismatch-penalty",
-        "1",
-        "--gap-open",
-        "-3",
-        "--gap-extend",
-        "-1",
-    ])
-    matrix = parasail_matrix(parasail, "ABC", 2, 1)
-    parasail_score = parasail.nw_scan_16("ACB", "A", 3, 1, matrix).score
-    compare("parasail global-affine", affine["score"], parasail_score, failures)
+    for case in LOCAL_CASES:
+        matrix = parasail_matrix(parasail, case)
+        hcp_score = hcp_linear(case, "local-linear")
+        external_score = parasail.sw_scan_16(
+            case.query, case.target, 0, abs(case.gap), matrix
+        ).score
+        results.append(compare("parasail", "local-linear", case.name, hcp_score, external_score))
 
-    local = run_hcp([
-        "local-linear",
-        "--query",
-        "ACACACTA",
-        "--target",
-        "AGCACACA",
-        "--match",
-        "2",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-2",
-    ])
-    matrix = parasail_matrix(parasail, "ACGT", 2, 1)
-    parasail_score = parasail.sw_scan_16("ACACACTA", "AGCACACA", 0, 2, matrix).score
-    compare("parasail local-linear", local["score"], parasail_score, failures)
-
-    return failures
+    return results
 
 
-def validate_edlib(required: bool) -> list[str]:
+def calibrate_parasail_affine(parasail) -> tuple[bool, list[dict[str, Any]]]:
+    cases = [
+        AffineCase("calibration_one_position_gap", "AC", "A"),
+        AffineCase("calibration_two_position_gap", "ACB", "A"),
+    ]
+    results = []
+    ok = True
+    for case in cases:
+        matrix = parasail_matrix(parasail, case)
+        hcp_score = hcp_affine(case)
+        external_score = parasail.nw_scan_16(
+            case.query,
+            case.target,
+            abs(case.gap_open),
+            abs(case.gap_extend),
+            matrix,
+        ).score
+        item = compare("parasail", "global-affine-calibration", case.name, hcp_score, external_score)
+        ok = ok and item["status"] == "passed"
+        results.append(item)
+    return ok, results
+
+
+def validate_edlib(required: bool) -> list[dict[str, Any]]:
     edlib = load_optional("edlib", required)
     if edlib is None:
-        return []
+        return [
+            result(tool="edlib", mode="edit-distance", case="all", status="skipped", detail="package not installed")
+        ]
 
-    failures: list[str] = []
-    hcp = run_hcp([
-        "edit-distance",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-    ])
-    edlib_distance = edlib.align("kitten", "sitting")["editDistance"]
-    compare("edlib edit-distance", hcp["distance"], edlib_distance, failures)
-    return failures
+    results = []
+    for case in EDIT_CASES:
+        hcp = run_hcp(["edit-distance", "--query", case.query, "--target", case.target])
+        external_distance = edlib.align(case.query, case.target)["editDistance"]
+        results.append(
+            compare("edlib", "edit-distance", case.name, int(hcp["distance"]), int(external_distance))
+        )
+    return results
 
 
-def compare(label: str, hcp_value: int, external_value: int, failures: list[str]) -> None:
-    if hcp_value == external_value:
-        print(f"[external] OK {label}: {hcp_value}")
-    else:
-        failures.append(f"{label}: hcp={hcp_value}, external={external_value}")
+def write_results(results: list[dict[str, Any]]) -> None:
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_PATH.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -129,25 +318,44 @@ def main() -> int:
     parser.add_argument(
         "--required",
         action="store_true",
-        help="fail if parasail or edlib is unavailable",
+        help="fail if parasail or edlib is unavailable or cannot match required scoring conventions",
     )
     args = parser.parse_args()
 
-    failures: list[str] = []
+    results: list[dict[str, Any]] = []
     try:
-        failures.extend(validate_parasail(args.required))
-        failures.extend(validate_edlib(args.required))
+        results.extend(validate_parasail(args.required))
+        results.extend(validate_edlib(args.required))
     except RuntimeError as exc:
+        results.append(
+            result(
+                tool="external",
+                mode="setup",
+                case="required",
+                status="failed",
+                detail=str(exc),
+            )
+        )
+        write_results(results)
         print(f"[external] {exc}", file=sys.stderr)
         return 2
 
+    write_results(results)
+    failures = [item for item in results if item["status"] == "failed"]
     if failures:
         print("[external] validation failures:", file=sys.stderr)
         for failure in failures:
-            print(f"  {failure}", file=sys.stderr)
+            print(
+                f"  {failure['tool']} {failure['mode']} {failure['case']}: "
+                f"hcp={failure['hcp']} external={failure['external']} {failure['detail']}",
+                file=sys.stderr,
+            )
         return 1
 
-    print("[external] validation complete")
+    passed = sum(1 for item in results if item["status"] == "passed")
+    skipped = sum(1 for item in results if item["status"] == "skipped")
+    print(f"[external] validation complete: passed={passed}, skipped={skipped}")
+    print(REPORT_PATH)
     return 0
 
 

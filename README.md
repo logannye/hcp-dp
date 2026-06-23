@@ -1,10 +1,11 @@
-# Height-Compressed Dynamic Programming (HCP-DP)
+# HCP-DP
 
-HCP-DP is an alpha-stage Rust crate for experimenting with exact dynamic
-programming over layered problems using composable interval summaries.
+HCP-DP is an alpha-stage Rust crate and CLI for exact sequence-alignment
+traceback from composable height-compressed dynamic-programming summaries.
 
-It now also ships `hcp-align`, a small command-line alignment tool for trying
-the correctness-tested sequence kernels without writing Rust code.
+The primary live-use surface is `hcp-align`, a command-line alignment tool for
+biosequence-style workloads. The library remains intentionally small while the
+height-compressed contract is hardened problem by problem.
 
 This repository was reset around a correctness-first contract. The public API is
 intentionally small until each built-in problem proves:
@@ -38,16 +39,17 @@ only after passing the same contract harness.
 
 ## Capability Matrix
 
-| Problem | Exact cost | Exact path | Summary laws | Parallel optimized | Benchmarked |
-|---------|------------|------------|--------------|--------------------|-------------|
-| LCS | yes | yes | yes | no | smoke only |
-| Needleman-Wunsch, linear gap | yes | yes | yes | no | smoke only |
-| Needleman-Wunsch, affine gap | yes | yes | yes | no | smoke only |
-| Smith-Waterman, linear gap | yes | yes | yes | no | smoke only |
-| Edit distance | yes | yes | yes | no | smoke only |
-| Semi-global, linear gap | yes | yes | yes | no | smoke only |
+| Problem | Exact cost | Exact path | Summary laws | CLI | External score validation | Report coverage | Caveat |
+|---------|------------|------------|--------------|-----|---------------------------|-----------------|--------|
+| LCS | yes | yes | yes | no | no | scale probe | library-only |
+| Needleman-Wunsch, linear gap | yes | yes | yes | yes | Parasail optional | scale probe | no SIMD baseline yet |
+| Needleman-Wunsch, affine gap | yes | yes | yes | yes | Parasail optional after gap calibration | scale probe | slower than linear modes |
+| Smith-Waterman, linear gap | yes | yes | yes | yes | Parasail optional | scale probe | selected local traceback only |
+| Edit distance | yes | yes | yes | yes | Edlib optional | scale probe | exact Levenshtein only |
+| Semi-global, linear gap | yes | yes | yes | yes | no | scale probe | full query vs target interval |
 
-Performance baselines are not enforced yet. Correctness comes first.
+Performance budgets are not enforced yet. Correctness comes first. See
+[docs/capabilities.md](docs/capabilities.md) for details.
 
 ## Core Contract
 
@@ -101,9 +103,10 @@ The important rules:
 ## Quickstart
 
 ```bash
+cargo install --path .
 cargo run --example lcs
 cargo run --example align
-cargo run --bin hcp-align -- global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify
+hcp-align global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify
 bash scripts/check.sh
 cargo run --bin scale_probe -- --format table --verify-limit 512
 ```
@@ -130,39 +133,52 @@ orientation.
 
 ## CLI
 
-`hcp-align` supports raw sequence text, single-record FASTA, and single-record
-FASTQ inputs:
+`hcp-align` supports raw inline sequences and multi-record FASTA/FASTQ files.
+File inputs use pairwise zip mode: query record `i` is aligned to target record
+`i`, and mismatched record counts are rejected.
 
 ```bash
-cargo run --bin hcp-align -- global-linear \
+hcp-align global-linear \
   --query GATTACA --target GCATGCU \
   --match 1 --mismatch-penalty 1 --gap -1 \
   --verify --format json
 
-cargo run --bin hcp-align -- global-affine \
+hcp-align global-affine \
   --query ACB --target A \
   --match 2 --mismatch-penalty 1 --gap-open -3 --gap-extend -1 \
   --verify --format json
 
-cargo run --bin hcp-align -- local-linear \
+hcp-align local-linear \
   --query ACACACTA --target AGCACACA \
   --match 2 --mismatch-penalty 1 --gap -2 \
   --verify --format json
 
-cargo run --bin hcp-align -- edit-distance \
+hcp-align edit-distance \
   --query kitten --target sitting \
   --verify --format json
 
-cargo run --bin hcp-align -- semiglobal-linear \
+hcp-align semiglobal-linear \
   --query ACGT --target TTACGTTT \
   --match 2 --mismatch-penalty 1 --gap -2 \
   --verify --format json
+
+hcp-align edit-distance \
+  --query-file reads.fa --target-file references.fa \
+  --verify --format jsonl
 ```
 
-JSON output includes the reported score or distance, independent path score,
-verification status, query/target coordinates, CIGAR-like operations using
-`=`, `X`, `D`, and `I`, and optional aligned strings when `--show-alignment` is
-set.
+Output formats are `text`, `json`, `jsonl`, `tsv`, and `cigar`. Every pair
+reports record ids, score or distance, independently scored path value,
+verification status, query/target coordinates, CIGAR-like operations using `=`,
+`X`, `D`, and `I`, block size, and elapsed milliseconds. `--show-alignment`
+adds aligned strings.
+
+`--verify` checks the returned objective against a full-table baseline when
+`max(query_len, target_len) <= --verify-limit`. The default limit is `2048`; use
+`--verify-limit 0` for no limit. Larger pairs still get independent path scoring
+and report `verification_status = "path_only"`.
+
+Full CLI reference: [docs/cli.md](docs/cli.md).
 
 ## Development Checks
 
@@ -179,7 +195,11 @@ set.
 
 CI mirrors these checks on stable Rust and the declared MSRV.
 External validation against Parasail and Edlib is available as a manual GitHub
-Actions workflow and is not part of default CI.
+Actions workflow and is not part of default CI. The manual workflow uploads
+`target/hcp-dp-report/` as an artifact.
+
+The alpha release checklist is in
+[docs/alpha-release-checklist.md](docs/alpha-release-checklist.md).
 
 ## Adding A New Problem
 

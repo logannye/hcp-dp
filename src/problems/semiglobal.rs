@@ -127,22 +127,98 @@ impl<'a> SemiGlobalProblem<'a> {
             .expect("semi-global reconstruction requires a selected interval")
     }
 
-    fn path_for_selection(&self, selection: SemiGlobalSelection) -> Vec<SemiGlobalCell> {
-        self.reconstruct_global_segment(selection.start, selection.end)
-    }
-
-    fn boundary_for_split(&self, row: usize, selection: SemiGlobalSelection) -> SemiGlobalBoundary {
-        let path = self.path_for_selection(selection);
-        let cell = path
-            .iter()
-            .find(|cell| cell.row == row)
-            .copied()
-            .expect("semi-global path must cross every query row");
+    fn boundary_for_split(
+        &self,
+        row: usize,
+        beta_a: &SemiGlobalBoundary,
+        beta_c: &SemiGlobalBoundary,
+        selection: SemiGlobalSelection,
+    ) -> SemiGlobalBoundary {
+        let start = self.cell_for_boundary(beta_a, selection);
+        let end = self.cell_for_boundary(beta_c, selection);
+        let col = self.split_col_for_segment(row, start, end);
         SemiGlobalBoundary {
             row,
-            col: cell.col,
+            col,
             selected: Some(selection),
         }
+    }
+
+    fn split_col_for_segment(
+        &self,
+        row: usize,
+        start: SemiGlobalCell,
+        end: SemiGlobalCell,
+    ) -> usize {
+        assert!(
+            start.row <= row && row <= end.row,
+            "split row outside semi-global segment"
+        );
+        let p = start.col;
+        let q = end.col;
+        assert!(
+            p <= q && q <= self.m(),
+            "invalid semi-global selected target interval"
+        );
+
+        let fwd = linear_last_row(
+            &self.s[start.row..row],
+            &self.t[p..q],
+            self.match_score,
+            self.mismatch_penalty,
+            self.gap_penalty,
+        );
+        let s_rev: Vec<u8> = self.s[row..end.row].iter().rev().copied().collect();
+        let t_rev: Vec<u8> = self.t[p..q].iter().rev().copied().collect();
+        let bwd = linear_last_row(
+            &s_rev,
+            &t_rev,
+            self.match_score,
+            self.mismatch_penalty,
+            self.gap_penalty,
+        );
+
+        let width = q - p;
+        let mut best_col = p;
+        let mut best_score = i32::MIN;
+        for local_col in 0..=width {
+            let score = fwd[local_col] + bwd[width - local_col];
+            if score > best_score {
+                best_score = score;
+                best_col = p + local_col;
+            }
+        }
+        best_col
+    }
+
+    fn cell_for_boundary(
+        &self,
+        boundary: &SemiGlobalBoundary,
+        selection: SemiGlobalSelection,
+    ) -> SemiGlobalCell {
+        if boundary.selected.is_none() && boundary.row == selection.start.row {
+            selection.start
+        } else {
+            SemiGlobalCell {
+                row: boundary.row,
+                col: boundary.col,
+            }
+        }
+    }
+
+    fn reconstruct_selected_subsegment(
+        &self,
+        beta_a: &SemiGlobalBoundary,
+        beta_b: &SemiGlobalBoundary,
+        selection: SemiGlobalSelection,
+    ) -> Vec<SemiGlobalCell> {
+        let start = self.cell_for_boundary(beta_a, selection);
+        let end = self.cell_for_boundary(beta_b, selection);
+        assert!(
+            start.row <= end.row && start.col <= end.col,
+            "semi-global leaf boundaries must be ordered"
+        );
+        self.reconstruct_global_segment(start, end)
     }
 
     fn reconstruct_global_segment(
@@ -324,7 +400,7 @@ impl<'a> HcpProblem for SemiGlobalProblem<'a> {
         assert_eq!(beta_c.row, c, "right boundary row must match interval end");
         assert!(a <= m && m <= c, "split must lie inside interval");
         let selection = self.selected_from_boundaries(beta_a, beta_c);
-        self.boundary_for_split(m, selection)
+        self.boundary_for_split(m, beta_a, beta_c, selection)
     }
 
     fn reconstruct_leaf(
@@ -337,18 +413,7 @@ impl<'a> HcpProblem for SemiGlobalProblem<'a> {
         assert_eq!(beta_a.row, a, "leaf start row must match beta_a");
         assert_eq!(beta_b.row, b, "leaf end row must match beta_b");
         let selection = self.selected_from_boundaries(beta_a, beta_b);
-        let path = self.path_for_selection(selection);
-        let start_idx = if beta_a.selected.is_none() && a == 0 {
-            0
-        } else {
-            boundary_path_index(&path, beta_a)
-        };
-        let end_idx = boundary_path_index(&path, beta_b);
-        assert!(
-            start_idx <= end_idx,
-            "semi-global leaf boundaries must be ordered"
-        );
-        path[start_idx..=end_idx].to_vec()
+        self.reconstruct_selected_subsegment(beta_a, beta_b, selection)
     }
 
     fn extract_cost(&self, _frontier_t: &Self::Frontier, beta_t: &Self::Boundary) -> Self::Cost {
@@ -448,6 +513,39 @@ fn choose_semiglobal_cell(
         .expect("semi-global cell has candidates")
 }
 
+fn linear_last_row(
+    x: &[u8],
+    y: &[u8],
+    match_score: i32,
+    mismatch_penalty: i32,
+    gap_penalty: i32,
+) -> Vec<i32> {
+    let mut prev = Vec::with_capacity(y.len() + 1);
+    let mut curr = vec![0; y.len() + 1];
+    prev.push(0);
+    for col in 1..=y.len() {
+        prev.push(prev[col - 1] + gap_penalty);
+    }
+
+    for &cx in x {
+        curr[0] = prev[0] + gap_penalty;
+        for col in 1..=y.len() {
+            let pair = if cx == y[col - 1] {
+                match_score
+            } else {
+                -mismatch_penalty
+            };
+            let diag = prev[col - 1] + pair;
+            let up = prev[col] + gap_penalty;
+            let left = curr[col - 1] + gap_penalty;
+            curr[col] = diag.max(up).max(left);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev
+}
+
 fn best_terminal_selection(row: usize, frontier: &SemiGlobalFrontier) -> SemiGlobalSelection {
     let mut best_col = 0;
     let mut best_score = i32::MIN;
@@ -462,16 +560,6 @@ fn best_terminal_selection(row: usize, frontier: &SemiGlobalFrontier) -> SemiGlo
         start: frontier.starts[best_col],
         end: SemiGlobalCell { row, col: best_col },
     }
-}
-
-fn boundary_path_index(path: &[SemiGlobalCell], boundary: &SemiGlobalBoundary) -> usize {
-    let cell = SemiGlobalCell {
-        row: boundary.row,
-        col: boundary.col,
-    };
-    path.iter()
-        .position(|path_cell| *path_cell == cell)
-        .expect("semi-global boundary must lie on selected path")
 }
 
 fn cell_idx(row: usize, col: usize, cols: usize) -> usize {

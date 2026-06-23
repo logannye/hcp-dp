@@ -305,7 +305,7 @@ fn run_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
 }
 
 fn run_smith_waterman(options: &Options, sys: &mut System) -> Vec<Measurement> {
-    const SIZES: &[usize] = &[64, 128, 256, 512, 1024];
+    const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048];
     const MATCH_SCORE: i32 = 2;
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_PENALTY: i32 = -2;
@@ -450,7 +450,7 @@ fn run_edit_distance(options: &Options, sys: &mut System) -> Vec<Measurement> {
 }
 
 fn run_semiglobal(options: &Options, sys: &mut System) -> Vec<Measurement> {
-    const SIZES: &[usize] = &[64, 128, 256, 512, 1024];
+    const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048];
     const MATCH_SCORE: i32 = 2;
     const MISMATCH_PENALTY: i32 = 1;
     const GAP_PENALTY: i32 = -2;

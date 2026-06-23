@@ -134,14 +134,13 @@ impl<'a> SmithWatermanProblem<'a> {
         }
     }
 
-    fn path_for_selection(&self, selection: SwSelection) -> Vec<SwCell> {
-        if selection.score <= 0 {
-            return Vec::new();
-        }
-        self.reconstruct_global_segment(selection.start, selection.end)
-    }
-
-    fn boundary_for_split(&self, row: usize, selection: SwSelection) -> SwBoundary {
+    fn boundary_for_split(
+        &self,
+        row: usize,
+        beta_a: &SwBoundary,
+        beta_c: &SwBoundary,
+        selection: SwSelection,
+    ) -> SwBoundary {
         if selection.score <= 0 {
             return SwBoundary {
                 row,
@@ -151,31 +150,144 @@ impl<'a> SmithWatermanProblem<'a> {
             };
         }
 
-        let path = self.path_for_selection(selection);
-        if let Some(cell) = path.iter().find(|cell| cell.row == row) {
+        if beta_c.phase == SwPhase::Before {
             return SwBoundary {
-                row,
-                col: cell.col,
-                phase: SwPhase::Active,
-                selected: selection,
-            };
-        }
-
-        if row < selection.start.row {
-            SwBoundary {
                 row,
                 col: selection.start.col,
                 phase: SwPhase::Before,
                 selected: selection,
-            }
-        } else {
-            SwBoundary {
+            };
+        }
+
+        if beta_a.phase == SwPhase::After {
+            return SwBoundary {
                 row,
                 col: selection.end.col,
                 phase: SwPhase::After,
                 selected: selection,
+            };
+        }
+
+        let start = self
+            .cell_for_boundary(beta_a, selection, true)
+            .unwrap_or(selection.start);
+        let end = self
+            .cell_for_boundary(beta_c, selection, false)
+            .unwrap_or(selection.end);
+
+        if row < start.row {
+            return SwBoundary {
+                row,
+                col: selection.start.col,
+                phase: SwPhase::Before,
+                selected: selection,
+            };
+        }
+
+        if row > end.row {
+            return SwBoundary {
+                row,
+                col: selection.end.col,
+                phase: SwPhase::After,
+                selected: selection,
+            };
+        }
+
+        let col = self.split_col_for_segment(row, start, end);
+        SwBoundary {
+            row,
+            col,
+            phase: SwPhase::Active,
+            selected: selection,
+        }
+    }
+
+    fn split_col_for_segment(&self, row: usize, start: SwCell, end: SwCell) -> usize {
+        assert!(
+            start.row <= row && row <= end.row,
+            "split row outside SW segment"
+        );
+        let p = start.col;
+        let q = end.col;
+        assert!(
+            p <= q && q <= self.m(),
+            "invalid SW selected target interval"
+        );
+
+        let fwd = linear_last_row(
+            &self.s[start.row..row],
+            &self.t[p..q],
+            self.match_score,
+            self.mismatch_penalty,
+            self.gap_penalty,
+        );
+        let s_rev: Vec<u8> = self.s[row..end.row].iter().rev().copied().collect();
+        let t_rev: Vec<u8> = self.t[p..q].iter().rev().copied().collect();
+        let bwd = linear_last_row(
+            &s_rev,
+            &t_rev,
+            self.match_score,
+            self.mismatch_penalty,
+            self.gap_penalty,
+        );
+
+        let width = q - p;
+        let mut best_col = p;
+        let mut best_score = i32::MIN;
+        for local_col in 0..=width {
+            let score = fwd[local_col] + bwd[width - local_col];
+            if score > best_score {
+                best_score = score;
+                best_col = p + local_col;
             }
         }
+        best_col
+    }
+
+    fn cell_for_boundary(
+        &self,
+        boundary: &SwBoundary,
+        selection: SwSelection,
+        start_side: bool,
+    ) -> Option<SwCell> {
+        match boundary.phase {
+            SwPhase::Before => start_side.then_some(selection.start),
+            SwPhase::Active => Some(SwCell {
+                row: boundary.row,
+                col: boundary.col,
+            }),
+            SwPhase::After => (!start_side).then_some(selection.end),
+        }
+    }
+
+    fn reconstruct_selected_subsegment(
+        &self,
+        beta_a: &SwBoundary,
+        beta_b: &SwBoundary,
+        selection: SwSelection,
+    ) -> Vec<SwCell> {
+        if selection.score <= 0 {
+            return Vec::new();
+        }
+
+        match (beta_a.phase, beta_b.phase) {
+            (SwPhase::Before, SwPhase::Before) | (SwPhase::After, SwPhase::After) => {
+                return Vec::new();
+            }
+            (SwPhase::After, _) | (_, SwPhase::Before) => return Vec::new(),
+            _ => {}
+        }
+
+        let Some(start) = self.cell_for_boundary(beta_a, selection, true) else {
+            return Vec::new();
+        };
+        let Some(end) = self.cell_for_boundary(beta_b, selection, false) else {
+            return Vec::new();
+        };
+        if start.row > end.row || start.col > end.col {
+            return Vec::new();
+        }
+        self.reconstruct_global_segment(start, end)
     }
 
     fn reconstruct_global_segment(&self, start: SwCell, end: SwCell) -> Vec<SwCell> {
@@ -359,7 +471,7 @@ impl<'a> HcpProblem for SmithWatermanProblem<'a> {
         assert_eq!(beta_c.row, c, "right boundary row must match interval end");
         assert!(a <= m && m <= c, "split must lie inside interval");
         let selection = self.selected_from_boundaries(beta_a, beta_c);
-        self.boundary_for_split(m, selection)
+        self.boundary_for_split(m, beta_a, beta_c, selection)
     }
 
     fn reconstruct_leaf(
@@ -372,26 +484,7 @@ impl<'a> HcpProblem for SmithWatermanProblem<'a> {
         assert_eq!(beta_a.row, a, "leaf start row must match beta_a");
         assert_eq!(beta_b.row, b, "leaf end row must match beta_b");
         let selection = self.selected_from_boundaries(beta_a, beta_b);
-        let path = self.path_for_selection(selection);
-        if path.is_empty() {
-            return Vec::new();
-        }
-
-        match (beta_a.phase, beta_b.phase) {
-            (SwPhase::Before, SwPhase::Before) | (SwPhase::After, SwPhase::After) => {
-                return Vec::new();
-            }
-            (SwPhase::After, _) | (_, SwPhase::Before) => return Vec::new(),
-            _ => {}
-        }
-
-        let start_idx = boundary_path_index(&path, beta_a, true);
-        let end_idx = boundary_path_index(&path, beta_b, false);
-        if start_idx > end_idx {
-            return Vec::new();
-        }
-
-        path[start_idx..=end_idx].to_vec()
+        self.reconstruct_selected_subsegment(beta_a, beta_b, selection)
     }
 
     fn extract_cost(&self, _frontier_t: &Self::Frontier, beta_t: &Self::Boundary) -> Self::Cost {
@@ -503,26 +596,37 @@ fn choose_sw_cell(reset: Candidate, diag: Candidate, up: Candidate, left: Candid
         .unwrap_or(reset)
 }
 
-fn boundary_path_index(path: &[SwCell], boundary: &SwBoundary, start_side: bool) -> usize {
-    match boundary.phase {
-        SwPhase::Before => 0,
-        SwPhase::After => path.len() - 1,
-        SwPhase::Active => {
-            let cell = SwCell {
-                row: boundary.row,
-                col: boundary.col,
-            };
-            if start_side {
-                path.iter()
-                    .position(|path_cell| *path_cell == cell)
-                    .expect("SW active start boundary must lie on selected path")
-            } else {
-                path.iter()
-                    .rposition(|path_cell| *path_cell == cell)
-                    .expect("SW active end boundary must lie on selected path")
-            }
-        }
+fn linear_last_row(
+    x: &[u8],
+    y: &[u8],
+    match_score: i32,
+    mismatch_penalty: i32,
+    gap_penalty: i32,
+) -> Vec<i32> {
+    let mut prev = Vec::with_capacity(y.len() + 1);
+    let mut curr = vec![0; y.len() + 1];
+    prev.push(0);
+    for col in 1..=y.len() {
+        prev.push(prev[col - 1] + gap_penalty);
     }
+
+    for &cx in x {
+        curr[0] = prev[0] + gap_penalty;
+        for col in 1..=y.len() {
+            let pair = if cx == y[col - 1] {
+                match_score
+            } else {
+                -mismatch_penalty
+            };
+            let diag = prev[col - 1] + pair;
+            let up = prev[col] + gap_penalty;
+            let left = curr[col - 1] + gap_penalty;
+            curr[col] = diag.max(up).max(left);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev
 }
 
 fn cell_idx(row: usize, col: usize, cols: usize) -> usize {

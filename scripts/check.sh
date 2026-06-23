@@ -60,12 +60,21 @@ json_field() {
   python3 -c 'import json,sys; value=json.load(sys.stdin)[sys.argv[1]]; print(str(value).lower() if isinstance(value, bool) else value)' "$field"
 }
 
+jsonl_field() {
+  local row="$1"
+  local field="$2"
+  python3 -c 'import json,sys; rows=[json.loads(line) for line in sys.stdin if line.strip()]; value=rows[int(sys.argv[1])][sys.argv[2]]; print(str(value).lower() if isinstance(value, bool) else value)' "$row" "$field"
+}
+
 assert_eq() { local got="$1" exp="$2" name="$3"; if [[ "$got" != "$exp" ]]; then echo "FAIL: $name (got=$got expected=$exp)"; exit 1; fi; }
 assert_nonempty() { local v="$1" name="$2"; if [[ -z "$v" ]]; then echo "FAIL: $name empty"; exit 1; fi; }
 
 require cargo
 require rustc
 require python3
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
 
 say "Toolchain versions"
 cargo --version
@@ -114,6 +123,7 @@ assert_eq "$SW_SCORE" "10" "Smith-Waterman local alignment score"
 say "Run CLI: global-linear"
 CLI_NW=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify --format json)
 assert_eq "$(printf '%s' "$CLI_NW" | json_field score)" "0" "CLI global-linear score"
+assert_eq "$(printf '%s' "$CLI_NW" | json_field verification_status)" "full" "CLI global-linear verification status"
 assert_eq "$(printf '%s' "$CLI_NW" | json_field verified)" "true" "CLI global-linear verified"
 
 say "Run CLI: global-affine"
@@ -137,6 +147,56 @@ assert_eq "$(printf '%s' "$CLI_SEMI" | json_field score)" "8" "CLI semiglobal-li
 assert_eq "$(printf '%s' "$CLI_SEMI" | json_field target_start)" "2" "CLI semiglobal target start"
 assert_eq "$(printf '%s' "$CLI_SEMI" | json_field target_end)" "6" "CLI semiglobal target end"
 assert_eq "$(printf '%s' "$CLI_SEMI" | json_field verified)" "true" "CLI semiglobal-linear verified"
+
+say "Run CLI: batch FASTA JSONL"
+cat >"${TMP_DIR}/query.fa" <<'EOF'
+>q1
+AC
+GT
+>q2
+AAAA
+EOF
+cat >"${TMP_DIR}/target.fa" <<'EOF'
+>t1
+ACGT
+>t2
+TTTT
+EOF
+CLI_BATCH_JSONL=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query-file "${TMP_DIR}/query.fa" --target-file "${TMP_DIR}/target.fa" --verify --format jsonl)
+assert_eq "$(printf '%s\n' "$CLI_BATCH_JSONL" | wc -l | tr -d ' ')" "2" "CLI batch JSONL row count"
+assert_eq "$(printf '%s' "$CLI_BATCH_JSONL" | jsonl_field 0 query_id)" "q1" "CLI batch JSONL query id"
+assert_eq "$(printf '%s' "$CLI_BATCH_JSONL" | jsonl_field 1 distance)" "4" "CLI batch JSONL second distance"
+
+say "Run CLI: batch FASTQ cigar"
+cat >"${TMP_DIR}/query.fq" <<'EOF'
+@fq1
+AC
++
+!!
+@fq2
+AA
++
+!!
+EOF
+cat >"${TMP_DIR}/target.fq" <<'EOF'
+@ft1
+AC
++
+!!
+@ft2
+AT
++
+!!
+EOF
+CLI_BATCH_CIGAR=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-linear --query-file "${TMP_DIR}/query.fq" --target-file "${TMP_DIR}/target.fq" --match 1 --mismatch-penalty 1 --gap -1 --format cigar)
+assert_eq "$(printf '%s\n' "$CLI_BATCH_CIGAR" | wc -l | tr -d ' ')" "3" "CLI batch cigar row count"
+printf '%s' "$CLI_BATCH_CIGAR" | grep -q 'pair_index	query_id	target_id' || { echo "FAIL: CLI cigar header missing"; exit 1; }
+
+say "Run CLI: TSV and verify limit"
+CLI_TSV=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- local-linear --query ACACACTA --target AGCACACA --show-alignment --format tsv)
+printf '%s' "$CLI_TSV" | grep -q 'pair_index	query_id	target_id' || { echo "FAIL: CLI TSV header missing"; exit 1; }
+CLI_PATH_ONLY=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-linear --query ACGT --target ACGT --verify --verify-limit 1 --format json)
+assert_eq "$(printf '%s' "$CLI_PATH_ONLY" | json_field verification_status)" "path_only" "CLI verify-limit path-only status"
 
 say "Run scale probe smoke"
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --format table --verify-limit 128 >/dev/null

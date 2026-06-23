@@ -1,19 +1,26 @@
-name: External Validation
+name: Release Validation Report
 
 on:
   workflow_dispatch:
 
 jobs:
-  external-validation:
-    name: Parasail and Edlib validation
+  release-report:
+    name: External validation and report
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install external validators
         run: python -m pip install parasail edlib
       - name: Validate HCP-DP scores against external libraries
         run: python scripts/validate_external.py --required
+      - name: Generate correctness and performance report
+        run: python scripts/perf_report.py --external-required --verify-limit 512
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hcp-dp-release-report
+          path: target/hcp-dp-report/

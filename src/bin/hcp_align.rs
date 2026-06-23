@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use hcp_dp::{
     alignment::{AlignmentOpKind, AlignmentTrace},
     problems::{
-        edit_distance::EditDistanceProblem,
+        edit_distance::{trace_adaptive_banded, trace_banded, EditDistanceProblem},
         nw_affine::{NwAffineProblem, NwAffineState},
         nw_align::NwProblem,
         semiglobal::{SemiGlobalCell, SemiGlobalProblem},
@@ -32,6 +32,9 @@ use sequence_io::{read_sequence_records, SequenceRecord};
 
 const SCHEMA_VERSION: &str = "hcp-align.v1";
 const ENGINE_NAME: &str = "hcp-dp";
+const AUTO_EDIT_BAND_MIN: usize = 8;
+const AUTO_EDIT_BAND_MAX: usize = 512;
+const AUTO_EDIT_BAND_DIVISOR: usize = 32;
 
 fn main() -> ExitCode {
     match run() {
@@ -144,6 +147,9 @@ struct EditDistanceCommand {
     output: OutputArgs,
     #[command(flatten)]
     block: BlockArgs,
+    /// Exact traceback engine to use.
+    #[arg(long, value_enum, default_value_t = EditDistanceEngine::Auto)]
+    engine: EditDistanceEngine,
 }
 
 #[derive(Args)]
@@ -239,6 +245,29 @@ enum OperationDetail {
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum EditDistanceEngine {
+    /// Deterministically choose a path-producing backend.
+    Auto,
+    /// Generic HCP summary-tree traceback with square-root checkpointing.
+    Hcp,
+    /// Generic HCP traceback with one-layer blocks for minimal retained state.
+    HcpLinear,
+    /// Exact adaptive-banded traceback for low-edit-distance inputs.
+    AdaptiveBanded,
+}
+
+impl EditDistanceEngine {
+    fn backend_label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Hcp => "hcp",
+            Self::HcpLinear => "hcp-linear",
+            Self::AdaptiveBanded => "adaptive-banded",
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum ProgressMode {
     Auto,
     Always,
@@ -289,6 +318,8 @@ struct Report {
     target_end: usize,
     cigar: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    backend: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     operation_counts: Option<Vec<OperationCount>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operations: Option<Vec<hcp_dp::alignment::AlignmentStep>>,
@@ -332,6 +363,7 @@ struct ReportMetrics {
     stats: HcpRunStats,
     elapsed_ms: f64,
     operation_detail: OperationDetail,
+    backend: Option<&'static str>,
 }
 
 impl ReportObjective {
@@ -381,7 +413,7 @@ fn run_affine_mode(args: AffineCommand) -> Result<Vec<Report>, String> {
 fn run_edit_distance_mode(args: EditDistanceCommand) -> Result<Vec<Report>, String> {
     let pairs = read_pairs(&args.input)?;
     run_pairs(&pairs, &args.output, "edit-distance", |pair| {
-        align_edit_distance(pair, &args.output, args.block)
+        align_edit_distance(pair, &args.output, args.block, args.engine)
     })
 }
 
@@ -542,6 +574,7 @@ fn align_global_linear(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
+            backend: None,
         },
     ))
 }
@@ -587,6 +620,7 @@ fn align_global_affine(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
+            backend: None,
         },
     ))
 }
@@ -632,6 +666,7 @@ fn align_local_linear(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
+            backend: None,
         },
     ))
 }
@@ -640,11 +675,87 @@ fn align_edit_distance(
     pair: &PairInput,
     output: &OutputArgs,
     block: BlockArgs,
+    engine: EditDistanceEngine,
 ) -> Result<Report, String> {
     let start = Instant::now();
     let problem = EditDistanceProblem::new(&pair.query.sequence, &pair.target.sequence);
-    let block_size = block_size_for(&problem, block.block_size)?;
-    let (distance, path, stats) = run_engine(problem.clone(), block.block_size);
+    let (distance, path, stats, block_size, backend) = match engine {
+        EditDistanceEngine::Auto => {
+            if block.block_size.is_some() {
+                return Err(
+                    "--block-size requires an explicit HCP edit-distance engine; use --engine hcp or --engine hcp-linear"
+                        .to_string(),
+                );
+            }
+            let band_limit =
+                auto_edit_band_limit(pair.query.sequence.len(), pair.target.sequence.len());
+            let trace_start = Instant::now();
+            if let Some(trace) =
+                trace_banded(&pair.query.sequence, &pair.target.sequence, band_limit)
+            {
+                (
+                    trace.distance,
+                    trace.path,
+                    HcpRunStats {
+                        summary_build_ms: 0.0,
+                        reconstruction_ms: trace_start.elapsed().as_secs_f64() * 1000.0,
+                    },
+                    0,
+                    Some(EditDistanceEngine::AdaptiveBanded.backend_label()),
+                )
+            } else {
+                let (distance, path, stats) =
+                    HcpEngine::linear_space(problem.clone()).run_with_stats();
+                (
+                    distance,
+                    path,
+                    stats,
+                    1,
+                    Some(EditDistanceEngine::HcpLinear.backend_label()),
+                )
+            }
+        }
+        EditDistanceEngine::Hcp => {
+            let block_size = block_size_for(&problem, block.block_size)?;
+            let (distance, path, stats) = run_engine(problem.clone(), block.block_size);
+            (distance, path, stats, block_size, None)
+        }
+        EditDistanceEngine::HcpLinear => {
+            if let Some(value) = block.block_size {
+                if value != 1 {
+                    return Err(
+                        "--engine hcp-linear requires --block-size 1 or no block override"
+                            .to_string(),
+                    );
+                }
+            }
+            let (distance, path, stats) = HcpEngine::linear_space(problem.clone()).run_with_stats();
+            (
+                distance,
+                path,
+                stats,
+                1,
+                Some(EditDistanceEngine::HcpLinear.backend_label()),
+            )
+        }
+        EditDistanceEngine::AdaptiveBanded => {
+            if block.block_size.is_some() {
+                return Err("--block-size applies only to HCP edit-distance engines".to_string());
+            }
+            let trace_start = Instant::now();
+            let trace = trace_adaptive_banded(&pair.query.sequence, &pair.target.sequence);
+            (
+                trace.distance,
+                trace.path,
+                HcpRunStats {
+                    summary_build_ms: 0.0,
+                    reconstruction_ms: trace_start.elapsed().as_secs_f64() * 1000.0,
+                },
+                0,
+                Some(EditDistanceEngine::AdaptiveBanded.backend_label()),
+            )
+        }
+    };
     let verify_start = Instant::now();
     let mut verification = verify_u32(output, pair, problem.score_path(&path), distance, || {
         problem.full_table_distance()
@@ -668,8 +779,22 @@ fn align_edit_distance(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
+            backend,
         },
     ))
+}
+
+fn auto_edit_band_limit(query_len: usize, target_len: usize) -> usize {
+    let max_len = query_len.max(target_len);
+    if max_len == 0 {
+        return 0;
+    }
+    let length_delta = query_len.abs_diff(target_len);
+    let similarity_band = (max_len / AUTO_EDIT_BAND_DIVISOR).clamp(
+        AUTO_EDIT_BAND_MIN.min(max_len),
+        AUTO_EDIT_BAND_MAX.min(max_len),
+    );
+    length_delta.max(similarity_band).min(max_len)
 }
 
 fn align_semiglobal_linear(
@@ -713,6 +838,7 @@ fn align_semiglobal_linear(
             stats,
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             operation_detail: output.operation_detail,
+            backend: None,
         },
     ))
 }
@@ -750,6 +876,7 @@ fn report_from_trace(
         target_start: trace.target_start,
         target_end: trace.target_end,
         cigar: trace.cigar,
+        backend: metrics.backend,
         operation_counts,
         operations,
         block_size: metrics.block_size,
@@ -797,6 +924,7 @@ fn error_report(pair: &PairInput, mode: &'static str, error: String) -> Report {
         target_start: 0,
         target_end: 0,
         cigar: String::new(),
+        backend: None,
         operation_counts: None,
         operations: None,
         block_size: 0,
@@ -975,6 +1103,9 @@ fn text_reports(reports: &[Report]) -> String {
         }
         if let Some(distance) = report.distance {
             output.push_str(&format!("distance: {distance}\n"));
+        }
+        if let Some(backend) = report.backend {
+            output.push_str(&format!("backend: {backend}\n"));
         }
         if let Some(path_score) = report.path_score {
             output.push_str(&format!("path_score: {path_score}\n"));

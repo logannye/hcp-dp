@@ -31,6 +31,16 @@ impl<P: HcpProblem> HcpEngine<P> {
         Self::with_block_size(problem, default_block_size(t))
     }
 
+    /// Create an engine in the memory-minimal linear-space traceback profile.
+    ///
+    /// This uses one-layer leaves (`block_size = 1`). For lightweight interval
+    /// summaries, this retains `O(T + F + L)` state for `T` layers, frontier
+    /// width `F`, and output path length `L`, while still reconstructing an
+    /// exact path.
+    pub fn linear_space(problem: P) -> Self {
+        Self::with_block_size(problem, 1)
+    }
+
     /// Create an engine with an explicit block size.
     ///
     /// # Panics
@@ -391,6 +401,15 @@ mod tests {
     #[test]
     fn run_concatenates_without_duplicate_midpoint() {
         let engine = HcpEngine::with_block_size(DummyProblem { layers: 4 }, 1);
+        let (cost, path) = engine.run();
+        assert_eq!(cost, 4);
+        assert_eq!(path, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn linear_space_constructor_uses_one_layer_blocks() {
+        let engine = HcpEngine::linear_space(DummyProblem { layers: 4 });
+        assert_eq!(engine.block_size(), 1);
         let (cost, path) = engine.run();
         assert_eq!(cost, 4);
         assert_eq!(path, vec![0, 1, 2, 3, 4]);

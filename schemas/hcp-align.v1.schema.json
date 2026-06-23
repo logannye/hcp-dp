@@ -53,6 +53,10 @@
     "target_start": { "type": "integer", "minimum": 0 },
     "target_end": { "type": "integer", "minimum": 0 },
     "cigar": { "type": "string" },
+    "backend": {
+      "description": "Optional problem-specific backend label. Omitted for the default HCP engine.",
+      "enum": ["hcp-linear", "adaptive-banded"]
+    },
     "operation_counts": {
       "type": "array",
       "items": { "$ref": "#/$defs/operation_count" }
@@ -61,7 +65,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/operation" }
     },
-    "block_size": { "type": "integer", "minimum": 1 },
+    "block_size": {
+      "description": "HCP summary-tree block size. Non-HCP exact backends use 0.",
+      "type": "integer",
+      "minimum": 0
+    },
     "path_length": { "type": "integer", "minimum": 0 },
     "summary_build_ms": { "type": "number", "minimum": 0 },
     "reconstruction_ms": { "type": "number", "minimum": 0 },

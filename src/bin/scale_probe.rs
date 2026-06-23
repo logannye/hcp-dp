@@ -11,8 +11,15 @@ use std::{
 
 use hcp_dp::{
     problems::{
-        edit_distance::EditDistanceProblem, lcs::LcsProblem, nw_affine::NwAffineProblem,
-        nw_align::NwProblem, semiglobal::SemiGlobalProblem, smith_waterman::SmithWatermanProblem,
+        edit_distance::{
+            distance_adaptive_banded, distance_linear_space, distance_myers_u64,
+            trace_adaptive_banded, EditDistanceProblem,
+        },
+        lcs::LcsProblem,
+        nw_affine::NwAffineProblem,
+        nw_align::NwProblem,
+        semiglobal::SemiGlobalProblem,
+        smith_waterman::SmithWatermanProblem,
     },
     HcpEngine, HcpRunStats,
 };
@@ -206,7 +213,7 @@ Options:
   --max-size <N>             Skip scenario sizes larger than N
   --mode <standard|edit-distance-deep>
                              Probe mode (default: standard)
-  --engine <hcp|full-table|hirschberg|edlib>
+  --engine <hcp|hcp-linear|adaptive-banded-path|full-table|linear-space|adaptive-banded|myers-u64|edlib>
                              Engine filter for --mode edit-distance-deep
   -h, --help                 Print this help
 "
@@ -240,8 +247,12 @@ impl ProbeMode {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DeepEngine {
     Hcp,
+    HcpLinear,
+    AdaptiveBandedPath,
     FullTable,
-    Hirschberg,
+    LinearSpace,
+    AdaptiveBanded,
+    MyersU64,
     Edlib,
 }
 
@@ -249,8 +260,12 @@ impl DeepEngine {
     fn from_str(value: &str) -> Result<Self, String> {
         match value {
             "hcp" => Ok(Self::Hcp),
+            "hcp-linear" => Ok(Self::HcpLinear),
+            "adaptive-banded-path" => Ok(Self::AdaptiveBandedPath),
             "full-table" => Ok(Self::FullTable),
-            "hirschberg" => Ok(Self::Hirschberg),
+            "hirschberg" | "linear-space" => Ok(Self::LinearSpace),
+            "adaptive-banded" => Ok(Self::AdaptiveBanded),
+            "myers-u64" => Ok(Self::MyersU64),
             "edlib" => Ok(Self::Edlib),
             other => Err(format!("unknown engine '{other}'")),
         }
@@ -259,8 +274,12 @@ impl DeepEngine {
     fn label(self) -> &'static str {
         match self {
             Self::Hcp => "hcp",
+            Self::HcpLinear => "hcp-linear",
+            Self::AdaptiveBandedPath => "adaptive-banded-path",
             Self::FullTable => "full-table",
-            Self::Hirschberg => "hirschberg",
+            Self::LinearSpace => "linear-space",
+            Self::AdaptiveBanded => "adaptive-banded",
+            Self::MyersU64 => "myers-u64",
             Self::Edlib => "edlib",
         }
     }
@@ -612,8 +631,12 @@ fn deep_engines(filter: Option<DeepEngine>) -> Vec<DeepEngine> {
         Some(engine) => vec![engine],
         None => vec![
             DeepEngine::Hcp,
+            DeepEngine::HcpLinear,
+            DeepEngine::AdaptiveBandedPath,
             DeepEngine::FullTable,
-            DeepEngine::Hirschberg,
+            DeepEngine::LinearSpace,
+            DeepEngine::AdaptiveBanded,
+            DeepEngine::MyersU64,
             DeepEngine::Edlib,
         ],
     }
@@ -627,9 +650,19 @@ fn edit_distance_cases() -> Vec<EditDistanceCase> {
             target: b"sitting".to_vec(),
         },
         EditDistanceCase {
+            name: "short_myers_window",
+            query: deterministic_dna(64),
+            target: deterministic_dna_offset(64, 1),
+        },
+        EditDistanceCase {
             name: "exact_match",
             query: deterministic_dna(256),
             target: deterministic_dna(256),
+        },
+        EditDistanceCase {
+            name: "long_low_edit",
+            query: deterministic_dna(2048),
+            target: low_edit_variant(2048),
         },
         EditDistanceCase {
             name: "all_mismatch",
@@ -671,6 +704,21 @@ fn edit_distance_cases() -> Vec<EditDistanceCase> {
 
 fn repeat_pattern(pattern: &[u8], len: usize) -> Vec<u8> {
     (0..len).map(|idx| pattern[idx % pattern.len()]).collect()
+}
+
+fn low_edit_variant(len: usize) -> Vec<u8> {
+    let mut data = deterministic_dna(len);
+    for idx in [17usize, 513, 1027, 1531] {
+        if let Some(byte) = data.get_mut(idx) {
+            *byte = match *byte {
+                b'A' => b'C',
+                b'C' => b'G',
+                b'G' => b'T',
+                _ => b'A',
+            };
+        }
+    }
+    data
 }
 
 fn measure_edit_distance_engine(
@@ -740,14 +788,85 @@ fn run_edit_distance_engine(
                 verification_ms: Some(verification_ms),
             }
         }
+        DeepEngine::HcpLinear => {
+            let problem = EditDistanceProblem::new(&case.query, &case.target);
+            let (distance, path, stats) = HcpEngine::linear_space(problem.clone()).run_with_stats();
+            let verify_start = Instant::now();
+            let path_score = problem.score_path(&path);
+            let verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+            let passed = distance == expected && path_score == Some(distance);
+            EditDistanceOutcome {
+                status: if passed {
+                    VerificationStatus::Passed
+                } else {
+                    VerificationStatus::Failed
+                },
+                detail: format!("distance={distance}, block_size=1, path_len={}", path.len()),
+                distance: Some(distance),
+                path_score,
+                path_len: Some(path.len()),
+                expected_distance: Some(expected),
+                stats: Some(stats),
+                verification_ms: Some(verification_ms),
+            }
+        }
+        DeepEngine::AdaptiveBandedPath => {
+            let problem = EditDistanceProblem::new(&case.query, &case.target);
+            let trace_start = Instant::now();
+            let trace = trace_adaptive_banded(&case.query, &case.target);
+            let trace_ms = trace_start.elapsed().as_secs_f64() * 1000.0;
+            let verify_start = Instant::now();
+            let path_score = problem.score_path(&trace.path);
+            let verification_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+            let passed = trace.distance == expected && path_score == Some(trace.distance);
+            EditDistanceOutcome {
+                status: if passed {
+                    VerificationStatus::Passed
+                } else {
+                    VerificationStatus::Failed
+                },
+                detail: format!(
+                    "distance={}, band={}, path_len={}",
+                    trace.distance,
+                    trace.band,
+                    trace.path.len()
+                ),
+                distance: Some(trace.distance),
+                path_score,
+                path_len: Some(trace.path.len()),
+                expected_distance: Some(expected),
+                stats: Some(HcpRunStats {
+                    summary_build_ms: 0.0,
+                    reconstruction_ms: trace_ms,
+                }),
+                verification_ms: Some(verification_ms),
+            }
+        }
         DeepEngine::FullTable => {
             let distance = edit_distance_full_table(&case.query, &case.target);
             edit_distance_baseline_outcome("full_table", distance, expected)
         }
-        DeepEngine::Hirschberg => {
-            let distance = edit_distance_linear_space(&case.query, &case.target);
+        DeepEngine::LinearSpace => {
+            let distance = distance_linear_space(&case.query, &case.target);
             edit_distance_baseline_outcome("linear_space", distance, expected)
         }
+        DeepEngine::AdaptiveBanded => {
+            let distance = distance_adaptive_banded(&case.query, &case.target);
+            edit_distance_baseline_outcome("adaptive_banded", distance, expected)
+        }
+        DeepEngine::MyersU64 => match distance_myers_u64(&case.query, &case.target) {
+            Some(distance) => edit_distance_baseline_outcome("myers_u64", distance, expected),
+            None => EditDistanceOutcome {
+                status: VerificationStatus::NotChecked,
+                detail: "pattern length exceeds 64 symbols".to_string(),
+                distance: None,
+                path_score: None,
+                path_len: None,
+                expected_distance: Some(expected),
+                stats: None,
+                verification_ms: None,
+            },
+        },
         DeepEngine::Edlib => match edlib_distance(&case.query, &case.target) {
             Ok(distance) => edit_distance_baseline_outcome("edlib", distance, expected),
             Err(err) => EditDistanceOutcome {
@@ -786,7 +905,7 @@ fn edit_distance_baseline_outcome(
 }
 
 fn edit_distance_linear_space(s: &[u8], t: &[u8]) -> u32 {
-    full_edit_distance(s, t)
+    distance_linear_space(s, t)
 }
 
 fn edit_distance_full_table(s: &[u8], t: &[u8]) -> u32 {

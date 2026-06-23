@@ -32,7 +32,7 @@ The formal JSON Schema is available at
 | `query_start`, `query_end` | Half-open query coordinates covered by the returned trace. |
 | `target_start`, `target_end` | Half-open target coordinates covered by the returned trace. |
 | `cigar` | Run-length encoded operations using `=`, `X`, `D`, and `I`. |
-| `block_size` | HCP summary-tree block size used for the run. |
+| `block_size` | HCP summary-tree block size used for the run; `0` means a non-HCP exact backend. |
 | `path_length` | Number of DP states in the returned path. |
 | `summary_build_ms` | Summary construction time in milliseconds. |
 | `reconstruction_ms` | Path reconstruction time in milliseconds. |
@@ -43,6 +43,7 @@ The formal JSON Schema is available at
 
 | Field | When Present |
 |---|---|
+| `backend` | Selected non-default per-problem backend, currently `hcp-linear` or `adaptive-banded` for edit distance, including selections made by `--engine auto`. |
 | `operation_counts` | Default for JSON/JSONL with `--operation-detail summary`. |
 | `operations` | Only with `--operation-detail full`. |
 | `aligned_query`, `aligned_target` | Only with `--show-alignment`. |

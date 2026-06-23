@@ -57,8 +57,9 @@ and uploads the same correctness/performance report artifact.
 - JSON/JSONL includes `schema_version` and `engine`.
 - JSON/JSONL defaults to compact operation counts; full operations are opt-in.
 - `--output`, `--progress`, `--continue-on-error`, and `--threads` are tested.
+- `edit-distance --engine auto` is tested and reports the selected backend.
 - Edit-distance deep reports compare HCP, full-table, linear-space, and optional
-  Edlib engines.
+  Edlib engines, plus adaptive-banded traceback and Myers score baselines.
 - Windows CI sets `SCALE_PROBE_MAX_SIZE=512` to keep smoke runtime comfortably
   below the job budget while local probes keep the larger default sizes.
 - Smith-Waterman and semi-global traceback avoid repeated full selected-path

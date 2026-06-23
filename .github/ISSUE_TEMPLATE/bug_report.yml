@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a problem. Exact score and exact traceback issues are especially important for this project.
+        Please include enough detail to reproduce the result. Exact score, distance, and traceback disagreements are treated as correctness bugs.
   - type: textarea
     id: command
     attributes:

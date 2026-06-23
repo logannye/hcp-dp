@@ -1,7 +1,8 @@
 # Contributing
 
-This crate is in an alpha correctness rebuild. Prefer deleting or hiding broken
-surface area over documenting around it.
+HCP-DP is an alpha-stage project, but the public surface is expected to remain
+truthful and well-tested. Prefer a small, proven capability over a broader API
+whose exact score or traceback cannot be independently verified.
 
 ## Required Checks
 
@@ -40,3 +41,9 @@ Do not export a new `problems::*` module until tests prove:
 
 If the proof is incomplete, keep the module private or behind an experimental
 feature.
+
+## Documentation Standards
+
+Public docs should state capability boundaries directly. When adding a new mode
+or backend, update the README, CLI reference, capability matrix, output schema
+if needed, and changelog in the same change.

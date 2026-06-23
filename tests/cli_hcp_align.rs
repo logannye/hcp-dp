@@ -336,6 +336,99 @@ fn output_flag_writes_to_file() {
 }
 
 #[test]
+fn edit_distance_alternate_engines_return_verified_paths() {
+    let auto = run(&[
+        "edit-distance",
+        "--query",
+        "ACGTACGT",
+        "--target",
+        "ACGTTCGT",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(auto.status.success(), "{}", stderr(&auto));
+    let auto_json: Value = serde_json::from_str(&stdout(&auto)).expect("valid json");
+    assert_eq!(auto_json["distance"], 1);
+    assert_eq!(auto_json["path_score"], 1);
+    assert_eq!(auto_json["verification_status"], "full");
+    assert_eq!(auto_json["backend"], "adaptive-banded");
+    assert_eq!(auto_json["block_size"], 0);
+
+    let adaptive = run(&[
+        "edit-distance",
+        "--engine",
+        "adaptive-banded",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(adaptive.status.success(), "{}", stderr(&adaptive));
+    let adaptive_json: Value = serde_json::from_str(&stdout(&adaptive)).expect("valid json");
+    assert_eq!(adaptive_json["distance"], 3);
+    assert_eq!(adaptive_json["path_score"], 3);
+    assert_eq!(adaptive_json["verification_status"], "full");
+    assert_eq!(adaptive_json["backend"], "adaptive-banded");
+    assert_eq!(adaptive_json["block_size"], 0);
+
+    let hcp_linear = run(&[
+        "edit-distance",
+        "--engine",
+        "hcp-linear",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--verify",
+        "--format",
+        "json",
+    ]);
+    assert!(hcp_linear.status.success(), "{}", stderr(&hcp_linear));
+    let hcp_linear_json: Value = serde_json::from_str(&stdout(&hcp_linear)).expect("valid json");
+    assert_eq!(hcp_linear_json["distance"], 3);
+    assert_eq!(hcp_linear_json["path_score"], 3);
+    assert_eq!(hcp_linear_json["verification_status"], "full");
+    assert_eq!(hcp_linear_json["backend"], "hcp-linear");
+    assert_eq!(hcp_linear_json["block_size"], 1);
+}
+
+#[test]
+fn adaptive_banded_engine_rejects_block_size_override() {
+    let output = run(&[
+        "edit-distance",
+        "--engine",
+        "adaptive-banded",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--block-size",
+        "1",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("--block-size applies only to HCP"));
+}
+
+#[test]
+fn auto_engine_rejects_block_size_override() {
+    let output = run(&[
+        "edit-distance",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--block-size",
+        "1",
+    ]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("--block-size requires an explicit HCP"));
+}
+
+#[test]
 fn continue_on_error_emits_failed_batch_records() {
     let query = temp_file("continue-query", ">q1\nAC\n>q2\nAA\n");
     let target = temp_file("continue-target", ">t1\nAC\n>t2\nAT\n");
@@ -345,6 +438,8 @@ fn continue_on_error_emits_failed_batch_records() {
         query.to_str().unwrap(),
         "--target-file",
         target.to_str().unwrap(),
+        "--engine",
+        "hcp",
         "--block-size",
         "0",
         "--continue-on-error",
@@ -386,6 +481,8 @@ fn progress_always_writes_to_stderr() {
 fn threads_one_works_without_parallel_feature() {
     let output = run(&[
         "edit-distance",
+        "--engine",
+        "hcp",
         "--query",
         "ACGT",
         "--target",
@@ -403,6 +500,8 @@ fn threads_one_works_without_parallel_feature() {
 fn threads_above_one_requires_parallel_feature() {
     let output = run(&[
         "edit-distance",
+        "--engine",
+        "hcp",
         "--query",
         "ACGT",
         "--target",
@@ -440,6 +539,8 @@ fn threads_above_one_works_with_parallel_feature() {
 fn json_output_has_stable_golden_contract() {
     let output = run(&[
         "edit-distance",
+        "--engine",
+        "hcp",
         "--query",
         "ACGT",
         "--target",
@@ -494,6 +595,8 @@ fn jsonl_output_has_stable_batch_golden_contract() {
         query.to_str().unwrap(),
         "--target-file",
         target.to_str().unwrap(),
+        "--engine",
+        "hcp",
         "--verify",
         "--block-size",
         "1",
@@ -574,6 +677,8 @@ fn jsonl_output_has_stable_batch_golden_contract() {
 fn tsv_and_cigar_outputs_have_stable_golden_contracts() {
     let tsv = run(&[
         "edit-distance",
+        "--engine",
+        "hcp",
         "--query",
         "ACGT",
         "--target",
@@ -592,6 +697,8 @@ fn tsv_and_cigar_outputs_have_stable_golden_contracts() {
 
     let cigar = run(&[
         "edit-distance",
+        "--engine",
+        "hcp",
         "--query",
         "ACGT",
         "--target",

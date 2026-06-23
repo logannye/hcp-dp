@@ -7,7 +7,17 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
-- No unreleased changes yet.
+- Added exact adaptive-banded edit-distance traceback for low-edit-distance
+  inputs, exposed through `hcp-align edit-distance --engine adaptive-banded`.
+- Added default `hcp-align edit-distance --engine auto` selection, which tries a
+  bounded exact banded traceback before falling back to HCP linear-space
+  traceback.
+- Added `hcp-linear`, adaptive-banded, Myers, full-table, and linear-space
+  edit-distance comparison modes to `scale_probe --mode edit-distance-deep`.
+- Added `HcpEngine::linear_space(problem)` for explicit linear-space exact
+  traceback runs.
+- Polished README, CLI docs, capability matrix, output schema, and package
+  metadata for production-facing users.
 
 ## 0.1.0-alpha.1 - 2026-06-23
 

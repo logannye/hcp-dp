@@ -1,15 +1,16 @@
 # Security Policy
 
-HCP-DP is an alpha-stage Rust project. The current public surface is a local
-library and CLI; it does not run a hosted service and does not process untrusted
-network traffic by itself.
+HCP-DP is a local Rust library and CLI. It does not run a hosted service and does
+not process network traffic by itself. Security reports are still welcome,
+especially for crashes, memory exhaustion, unsafe archive handling, or behavior
+that could affect automated batch pipelines.
 
 ## Supported Versions
 
 | Version | Status |
 |---|---|
 | `main` | Supported for security fixes. |
-| `0.1.0-alpha.*` | Supported once alpha prereleases are published. |
+| `0.1.0-alpha.*` | Supported for security fixes. |
 
 Older commits and experimental branches are not supported.
 
@@ -28,4 +29,4 @@ Please include:
 - whether the issue affects default builds or optional features.
 
 The maintainer will acknowledge valid reports, work toward a fix on `main`, and
-include the fix in the next alpha artifact when release artifacts are available.
+include the fix in the next alpha artifact.

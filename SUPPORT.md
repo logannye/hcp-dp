@@ -1,7 +1,7 @@
 # Support
 
 HCP-DP is currently an alpha project. The best support path is a GitHub issue
-with a minimal reproducer.
+with a minimal reproducer and, when possible, an independent expected result.
 
 Use issues for:
 

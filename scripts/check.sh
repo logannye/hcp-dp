@@ -148,7 +148,14 @@ say "Run CLI: edit-distance"
 CLI_EDIT=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query kitten --target sitting --verify --format json)
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field schema_version)" "hcp-align.v1" "CLI schema version"
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field distance)" "3" "CLI edit-distance distance"
+assert_eq "$(printf '%s' "$CLI_EDIT" | json_field backend)" "adaptive-banded" "CLI edit-distance auto backend"
 assert_eq "$(printf '%s' "$CLI_EDIT" | json_field verified)" "true" "CLI edit-distance verified"
+
+say "Run CLI: edit-distance adaptive-banded"
+CLI_EDIT_BANDED=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --engine adaptive-banded --query kitten --target sitting --verify --format json)
+assert_eq "$(printf '%s' "$CLI_EDIT_BANDED" | json_field distance)" "3" "CLI adaptive-banded edit-distance distance"
+assert_eq "$(printf '%s' "$CLI_EDIT_BANDED" | json_field path_score)" "3" "CLI adaptive-banded edit-distance path score"
+assert_eq "$(printf '%s' "$CLI_EDIT_BANDED" | json_field backend)" "adaptive-banded" "CLI adaptive-banded backend"
 
 say "Run CLI: compact/full operation detail and output file"
 CLI_EDIT_FULL=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query ACGT --target ACGA --operation-detail full --format json)
@@ -221,6 +228,8 @@ if [[ -n "${SCALE_PROBE_MAX_SIZE}" ]]; then
 fi
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- "${SCALE_PROBE_ARGS[@]}" >/dev/null
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine hcp --max-size 128 --format json >/dev/null
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine adaptive-banded --max-size 2048 --format json >/dev/null
+cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --mode edit-distance-deep --engine adaptive-banded-path --max-size 2048 --format json >/dev/null
 
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Benches (dev mode, faster)"

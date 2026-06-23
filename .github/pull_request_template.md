@@ -17,6 +17,13 @@
 - [ ] Returned paths remain independently scored.
 - [ ] Full-table or external baselines were updated where applicable.
 
+## Public Surface
+
+- [ ] README, CLI docs, capability matrix, schema docs, and changelog were
+      updated where user-visible behavior changed.
+- [ ] Performance or memory claims are backed by a reproducible command or
+      report artifact.
+
 ## Notes
 
 Mention any intentionally deferred follow-up work, performance caveats, or

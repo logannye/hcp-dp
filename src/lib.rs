@@ -1,8 +1,8 @@
-//! Height-Compressed Dynamic Programming (HCP-DP).
+//! Exact traceback from height-compressed dynamic-programming summaries.
 //!
 //! This crate provides a generic summary-tree engine plus correctness-tested
-//! sequence-alignment kernels. The current public surface is intentionally
-//! small while each problem is proven against the same contract:
+//! sequence-alignment kernels. The public surface is intentionally small while
+//! each exported problem is proven against the same contract:
 //!
 //! - interval summaries apply like direct DP replay,
 //! - adjacent summaries merge into the direct combined interval,
@@ -10,9 +10,16 @@
 //! - reconstructed paths join exactly,
 //! - independently scored paths realize the reported objective.
 //!
-//! The companion `hcp-align` binary is the primary alpha user surface. It
+//! The companion `hcp-align` binary is the primary user surface. It
 //! exposes global, local, semi-global, affine-gap, and edit-distance modes with
-//! structured output and optional baseline verification.
+//! structured output, deterministic edit-distance backend selection, and
+//! optional baseline verification.
+//!
+//! The edit-distance module also exposes specialized exact engines: rolling-row
+//! linear-space scoring, adaptive-banded traceback for low-edit regimes, and a
+//! single-word Myers bit-vector score backend for patterns up to 64 symbols.
+//! Those are used in report tooling to make the generic HCP traceback engine's
+//! tradeoffs visible against specialized frontier algorithms.
 //!
 //! See the repository README and `docs/design.md` for the technical overview.
 

@@ -4,16 +4,16 @@ use crate::HcpProblem;
 
 /// Builder for configuring an [`HcpEngine`] before execution.
 ///
-/// The builder lets you override the block size heuristic and the execution
-/// mode. By default it mirrors [`HcpEngine::new`] (`Summarized` mode with
-/// `√T` block size).
+/// The builder lets you override the block size heuristic and execution profile.
+/// By default it mirrors [`HcpEngine::new`] with a square-root checkpoint block
+/// size.
 ///
 /// # Examples
 /// ```
 /// use hcp_dp::{HcpEngineBuilder, problems::lcs::LcsProblem};
 ///
 /// let engine = HcpEngineBuilder::new(LcsProblem::new(b"AA", b"A"))
-///     .with_block_size(1)
+///     .linear_space()
 ///     .build();
 ///
 /// let (cost, path) = engine.run();
@@ -41,6 +41,15 @@ impl<P: HcpProblem> HcpEngineBuilder<P> {
         self.block_size = Some(block_size);
         self
     }
+
+    /// Use the memory-minimal exact traceback profile (`block_size = 1`).
+    ///
+    /// This is the named builder equivalent of [`HcpEngine::linear_space`].
+    pub fn linear_space(mut self) -> Self {
+        self.block_size = Some(1);
+        self
+    }
+
     /// Finalise the builder and return a configured [`HcpEngine`].
     pub fn build(self) -> HcpEngine<P> {
         match self.block_size {

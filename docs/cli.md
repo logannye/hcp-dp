@@ -1,18 +1,21 @@
 # hcp-align CLI Reference
 
-`hcp-align` is the alpha command-line surface for the verified sequence
-alignment kernels.
+`hcp-align` is the command-line surface for HCP-DP's verified sequence-alignment
+kernels. It is designed for exact score or distance plus an exact reconstructed
+path, with structured output that can be consumed by scripts and batch
+pipelines.
 
 ## Install
 
 ```bash
-cargo install --path .
+cargo install --git https://github.com/logannye/hcp-dp --bin hcp-align
 hcp-align --help
 ```
 
-During development, the same commands can be run through Cargo:
+From a local checkout, install or run through Cargo:
 
 ```bash
+cargo install --path .
 cargo run --bin hcp-align -- global-linear --query ACGT --target ACGT
 ```
 
@@ -27,7 +30,7 @@ checksum.
 | `global-linear` | Global Needleman-Wunsch alignment with a linear gap penalty. |
 | `global-affine` | Global Gotoh alignment with affine gap penalties. |
 | `local-linear` | Smith-Waterman local alignment with a linear gap penalty. |
-| `edit-distance` | Exact Levenshtein edit distance. |
+| `edit-distance` | Exact Levenshtein edit distance and traceback. |
 | `semiglobal-linear` | Full query aligned against any target interval; target prefix/suffix are free. |
 
 ## Inputs
@@ -44,8 +47,8 @@ Each run requires exactly one query source and exactly one target source:
 Raw inline input is always a single record. File input may be raw sequence text,
 FASTA, or FASTQ.
 
-FASTA supports wrapped sequence lines. FASTQ supports standard four-line records;
-wrapped FASTQ is intentionally out of scope for this alpha. Sequences are
+FASTA supports wrapped sequence lines. FASTQ supports standard four-line records.
+Wrapped FASTQ is intentionally out of scope for this alpha. Sequences are
 normalized by stripping whitespace and uppercasing ASCII.
 
 For multi-record files, `hcp-align` uses pairwise zip mode: query record `i` is
@@ -70,6 +73,7 @@ Per-pair structured output includes:
 - `query_id`, `target_id`
 - `mode`
 - `score` or `distance`
+- optional `backend` for non-default per-problem engines
 - `path_score`
 - `verification_status`
 - `verified`
@@ -181,6 +185,23 @@ Affine convention: the first position in a gap costs
 Edit distance has fixed unit costs: substitution, insertion, and deletion cost
 `1`.
 
+Edit-distance backend selection:
+
+```bash
+--engine auto|hcp|hcp-linear|adaptive-banded
+```
+
+`auto` is the default. It first attempts an exact bounded banded traceback for
+near matches and falls back to HCP linear-space traceback when the optimum is
+outside the auto band. `hcp` is the generic summary-tree traceback engine.
+`hcp-linear` uses the same HCP contract with one-layer blocks to minimize
+retained state. `adaptive-banded` is an exact specialized traceback backend for
+low-edit-distance inputs; it ignores HCP block sizing and rejects
+`--block-size`.
+
+`--block-size` is accepted only with explicit HCP engines: `hcp` and
+`hcp-linear`.
+
 ## Examples
 
 ```bash
@@ -201,6 +222,13 @@ hcp-align global-affine \
 hcp-align edit-distance \
   --query-file reads.fa --target-file references.fa \
   --verify --format jsonl --output results.jsonl
+```
+
+```bash
+hcp-align edit-distance \
+  --engine adaptive-banded \
+  --query ACGTACGT --target ACGTTCGT \
+  --verify --format json
 ```
 
 The repository includes small sample files under `examples/data/`:
@@ -232,5 +260,7 @@ hcp-align semiglobal-linear \
 - No SAM/BAM/PAF export yet.
 - Protein substitution matrices are not implemented; scoring is match/mismatch.
 - Multi-threaded batch mode requires the optional `parallel` feature.
+- `adaptive-banded` edit-distance traceback is exact but worst-case quadratic
+  when inputs are far from the main diagonal.
 - Performance is still reported conservatively until release artifacts include
   larger reproducible benchmarks.

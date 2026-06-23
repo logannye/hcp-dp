@@ -1,7 +1,7 @@
 # Capability Matrix
 
-This matrix describes what the current alpha can claim. A row should not be
-expanded until the module passes the contract harness and has user-facing
+This matrix is the public claim boundary for the current alpha. A row should not
+be expanded until the module passes the contract harness and has user-facing
 validation where applicable.
 
 | Problem | Exact objective | Exact path | Summary laws | CLI support | External score validation | Benchmark/report coverage | Known caveat |
@@ -10,7 +10,10 @@ validation where applicable.
 | Needleman-Wunsch, linear gap | yes | yes | yes | yes, `global-linear` | Parasail optional | `scale_probe`, report workflow | No SIMD runtime path; Parasail is validation only. |
 | Needleman-Wunsch, affine gap | yes | yes | yes | yes, `global-affine` | Parasail optional after affine calibration | `scale_probe`, report workflow | Boundary state is explicit; still slower than linear modes. |
 | Smith-Waterman, linear gap | yes | yes | yes | yes, `local-linear` | Parasail optional | `scale_probe`, report workflow | Returns the selected local traceback, not flanking unaligned regions. |
-| Edit distance | yes | yes | yes | yes, `edit-distance` | Edlib optional | deep comparison report | Levenshtein distance only; flagship proof point for this alpha. |
+| Edit distance, auto backend | yes | yes | n/a | yes, default `edit-distance` | Edlib optional | CLI smoke tests, deep comparison report | Deterministically selects exact adaptive-banded traceback or HCP linear-space fallback. |
+| Edit distance, HCP traceback | yes | yes | yes | yes, `edit-distance --engine hcp` | Edlib optional | deep comparison report, `hcp` and `hcp-linear` engines | Generic summary-tree traceback. |
+| Edit distance, adaptive banded | yes | yes | n/a | yes, `edit-distance --engine adaptive-banded` | checked against linear-space baseline; Edlib optional | deep comparison report, `adaptive-banded-path` engine | Exact specialized traceback; fastest when final edit distance is small. |
+| Edit distance, Myers u64 | yes | no | n/a | report tool only | checked against linear-space baseline | deep comparison report, `myers-u64` engine | Exact distance only; pattern length must be at most 64 symbols. |
 | Semi-global, linear gap | yes | yes | yes | yes, `semiglobal-linear` | no external anchor yet | `scale_probe`, report workflow | Full query against any target interval; swap inputs for the opposite orientation. |
 
 ## Contract Harness
@@ -56,6 +59,19 @@ target/hcp-dp-report/external-validation.json
 
 Manual GitHub release validation uploads the same directory as an artifact.
 
-The edit-distance deep report compares the HCP traceback engine against
-full-table and linear-space baselines for fixed scenario families. Edlib is
-included when the optional Python package is installed.
+The edit-distance deep report compares:
+
+- `hcp`: default square-root checkpoint exact traceback,
+- `hcp-linear`: exact traceback with `block_size = 1`,
+- `adaptive-banded-path`: exact traceback for low-edit regimes,
+- `full-table`: dense score baseline,
+- `linear-space`: rolling-row score baseline,
+- `adaptive-banded`: exact score-only baseline for low-edit regimes,
+- `myers-u64`: exact bit-vector score baseline for short patterns,
+- `edlib`: optional external exact score anchor.
+
+Use:
+
+```bash
+cargo run --bin scale_probe -- --mode edit-distance-deep --format table
+```

@@ -10,6 +10,9 @@ on:
         default: "0"
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   perf:
     runs-on: ubuntu-latest
@@ -22,3 +25,12 @@ jobs:
           PERF_ENFORCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.enforce || '0' }}
         run: |
           bash scripts/check.sh
+      - name: Generate performance report
+        run: python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: nightly-perf-report
+          path: |
+            target/hcp-dp-report/
+            target/criterion/

@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/logannye/hcp-dp/blob/main/schemas/hcp-align.v1.schema.json",
+  "title": "hcp-align report",
+  "description": "Per-pair structured output record emitted by hcp-align.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "engine",
+    "pair_index",
+    "query_id",
+    "target_id",
+    "mode",
+    "score",
+    "distance",
+    "path_score",
+    "verification_status",
+    "verified",
+    "query_start",
+    "query_end",
+    "target_start",
+    "target_end",
+    "cigar",
+    "block_size",
+    "path_length",
+    "summary_build_ms",
+    "reconstruction_ms",
+    "verification_ms",
+    "elapsed_ms"
+  ],
+  "properties": {
+    "schema_version": { "const": "hcp-align.v1" },
+    "engine": { "const": "hcp-dp" },
+    "pair_index": { "type": "integer", "minimum": 0 },
+    "query_id": { "type": "string" },
+    "target_id": { "type": "string" },
+    "mode": {
+      "enum": [
+        "global-linear",
+        "global-affine",
+        "local-linear",
+        "edit-distance",
+        "semiglobal-linear"
+      ]
+    },
+    "score": { "type": ["integer", "null"] },
+    "distance": { "type": ["integer", "null"], "minimum": 0 },
+    "path_score": { "type": ["integer", "null"] },
+    "verification_status": { "enum": ["full", "path_only", "failed"] },
+    "verified": { "type": ["boolean", "null"] },
+    "query_start": { "type": "integer", "minimum": 0 },
+    "query_end": { "type": "integer", "minimum": 0 },
+    "target_start": { "type": "integer", "minimum": 0 },
+    "target_end": { "type": "integer", "minimum": 0 },
+    "cigar": { "type": "string" },
+    "operation_counts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation_count" }
+    },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "block_size": { "type": "integer", "minimum": 1 },
+    "path_length": { "type": "integer", "minimum": 0 },
+    "summary_build_ms": { "type": "number", "minimum": 0 },
+    "reconstruction_ms": { "type": "number", "minimum": 0 },
+    "verification_ms": { "type": "number", "minimum": 0 },
+    "aligned_query": { "type": "string" },
+    "aligned_target": { "type": "string" },
+    "error": { "type": "string" },
+    "elapsed_ms": { "type": "number", "minimum": 0 }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "operation_kind": {
+      "enum": ["match", "mismatch", "gap_in_target", "gap_in_query"]
+    },
+    "operation_count": {
+      "type": "object",
+      "required": ["op", "count"],
+      "properties": {
+        "op": { "$ref": "#/$defs/operation_kind" },
+        "count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": [
+        "op",
+        "query_pos",
+        "target_pos",
+        "query_base",
+        "target_base"
+      ],
+      "properties": {
+        "op": { "$ref": "#/$defs/operation_kind" },
+        "query_pos": { "type": ["integer", "null"], "minimum": 0 },
+        "target_pos": { "type": ["integer", "null"], "minimum": 0 },
+        "query_base": { "type": ["string", "null"], "maxLength": 1 },
+        "target_base": { "type": ["string", "null"], "maxLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

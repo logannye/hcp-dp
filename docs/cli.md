@@ -20,6 +20,9 @@ GitHub alpha builds are produced by the manual `Release Alpha` workflow. Each
 artifact includes the `hcp-align` binary, README, license, and a SHA-256
 checksum.
 
+After the first alpha prerelease is published, downloadable artifacts will be
+available from the GitHub Releases page.
+
 ## Commands
 
 | Command | Meaning |
@@ -83,6 +86,10 @@ Per-pair structured output includes:
 - `elapsed_ms`
 - `aligned_query`, `aligned_target` when `--show-alignment` is set
 - `error` for failed per-pair records when `--continue-on-error` is used
+
+The schema reference is documented in
+[docs/output-schema.md](output-schema.md), with a formal JSON Schema at
+[`schemas/hcp-align.v1.schema.json`](../schemas/hcp-align.v1.schema.json).
 
 `verified` remains for simple compatibility with earlier JSON output. New
 consumers should use `verification_status`.
@@ -197,6 +204,15 @@ hcp-align global-affine \
 hcp-align edit-distance \
   --query-file reads.fa --target-file references.fa \
   --verify --format jsonl --output results.jsonl
+```
+
+The repository includes small sample files under `examples/data/`:
+
+```bash
+hcp-align edit-distance \
+  --query-file examples/data/reads.fa \
+  --target-file examples/data/references.fa \
+  --verify --format jsonl
 ```
 
 ```bash

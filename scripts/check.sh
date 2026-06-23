@@ -91,6 +91,9 @@ cargo fmt --all -- --check
 say "Clippy (deny warnings)"
 cargo_with_features clippy --workspace --all-targets ${VERBOSE:+-v} -- -D warnings
 
+say "Rustdoc (deny warnings)"
+RUSTDOCFLAGS="-D warnings" cargo_with_features doc --workspace --no-deps --quiet
+
 say "Build (${RELEASE:+release} build)"
 cargo_with_features build --workspace --all-targets ${RELEASE_FLAG:-}
 

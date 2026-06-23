@@ -1,0 +1,51 @@
+name: Bug report
+description: Report an incorrect result, crash, or confusing behavior.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Exact score and exact traceback issues are especially important for this project.
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or code
+      description: Paste the exact `hcp-align` command or minimal Rust snippet.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: Include the smallest query/target pair or input file content that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Include the expected score, distance, CIGAR, or traceback if known.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Paste the actual output or error.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: `hcp-align --version`, release tag, or commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture, and Rust version if building from source.
+      placeholder: "macOS 15 arm64, rustc 1.88.0"

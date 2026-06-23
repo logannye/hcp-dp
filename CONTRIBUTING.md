@@ -17,6 +17,7 @@ Useful focused checks:
 cargo test --lib --tests
 cargo test --features tracing --lib --tests
 cargo test --features parallel --lib --tests
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo run --bin scale_probe -- --format table --verify-limit 512
 cargo run --bin hcp-align -- edit-distance --query kitten --target sitting --verify
 python3 scripts/validate_external.py

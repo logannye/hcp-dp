@@ -3,6 +3,9 @@ name: Release Alpha
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-binary:
     name: Build alpha binary
@@ -24,6 +27,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build release binary
         run: cargo build --release --bin hcp-align
+      - name: Smoke test binary
+        shell: bash
+        run: target/release/${{ matrix.binary }} --help
       - name: Package binary
         shell: bash
         run: |

@@ -7,6 +7,7 @@ license = "MIT"
 authors = ["Logan Nye"]
 description = "Alpha-stage height-compressed dynamic programming engine with correctness-tested sequence alignment kernels and CLI."
 repository = "https://github.com/logannye/hcp-dp"
+homepage = "https://github.com/logannye/hcp-dp#readme"
 readme = "README.md"
 keywords = ["dynamic-programming", "algorithms", "bioinformatics", "compression"]
 categories = ["algorithms", "science", "data-structures"]

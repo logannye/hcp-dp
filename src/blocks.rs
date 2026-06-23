@@ -1,16 +1,16 @@
 //! Block-level data structures used by the engine.
 //!
-//! Each `BlockSummary` represents an interval [start, end) of layers and
-//! its associated summary Σ[start,end].
+//! Each `BlockSummary` represents an interval `[start, end)` of layers and
+//! its associated summary `Σ[start,end]`.
 
-/// Summary for a contiguous interval of layers [start, end).
+/// Summary for a contiguous interval of layers `[start, end)`.
 #[derive(Debug, Clone)]
 pub struct BlockSummary<S> {
     /// Inclusive start layer index a.
     pub start: usize,
-    /// Exclusive end layer index b; the block covers layers [start, end).
+    /// Exclusive end layer index b; the block covers layers `[start, end)`.
     pub end: usize,
-    /// Interval summary Σ[start, end].
+    /// Interval summary `Σ[start, end]`.
     pub summary: S,
 }
 

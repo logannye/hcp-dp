@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-test:
     name: Lint & Test
@@ -27,6 +34,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - name: Cargo check (MSRV)
         run: cargo check --workspace --all-targets
+
+  rustdoc:
+    name: Rustdoc Warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build docs with warnings denied
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
   feature-checks:
     name: Feature Checks

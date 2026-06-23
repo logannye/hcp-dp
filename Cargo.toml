@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.88"
 license = "MIT"
 authors = ["Logan Nye"]
-description = "Alpha-stage height-compressed dynamic programming engine with correctness-tested LCS and Needleman-Wunsch examples."
+description = "Alpha-stage height-compressed dynamic programming engine with correctness-tested sequence alignment kernels and CLI."
 repository = "https://github.com/logannye/hcp-dp"
 readme = "README.md"
 keywords = ["dynamic-programming", "algorithms", "bioinformatics", "compression"]
@@ -15,8 +15,15 @@ categories = ["algorithms", "science", "data-structures"]
 name = "hcp_dp"
 path = "src/lib.rs"
 
+[[bin]]
+name = "hcp-align"
+path = "src/bin/hcp_align.rs"
+
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.10", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tracing = { version = "0.1", optional = true }
 sysinfo = "0.30"
 [dev-dependencies]

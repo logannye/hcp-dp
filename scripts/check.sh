@@ -55,6 +55,11 @@ parse_float() { # grep first float-like from stdin
   grep -Eo '[-+]?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?' | head -n1 || true
 }
 
+json_field() {
+  local field="$1"
+  python3 -c 'import json,sys; value=json.load(sys.stdin)[sys.argv[1]]; print(str(value).lower() if isinstance(value, bool) else value)' "$field"
+}
+
 assert_eq() { local got="$1" exp="$2" name="$3"; if [[ "$got" != "$exp" ]]; then echo "FAIL: $name (got=$got expected=$exp)"; exit 1; fi; }
 assert_nonempty() { local v="$1" name="$2"; if [[ -z "$v" ]]; then echo "FAIL: $name empty"; exit 1; fi; }
 
@@ -105,6 +110,33 @@ SW_OUT=$(cargo_with_features run --quiet --example smith_waterman ${RELEASE_FLAG
 SW_SCORE=$(printf '%s' "$SW_OUT" | grep -E "^Local alignment score:" | parse_num)
 assert_nonempty "$SW_SCORE" "Smith-Waterman score"
 assert_eq "$SW_SCORE" "10" "Smith-Waterman local alignment score"
+
+say "Run CLI: global-linear"
+CLI_NW=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-linear --query GATTACA --target GCATGCU --match 1 --mismatch-penalty 1 --gap -1 --verify --format json)
+assert_eq "$(printf '%s' "$CLI_NW" | json_field score)" "0" "CLI global-linear score"
+assert_eq "$(printf '%s' "$CLI_NW" | json_field verified)" "true" "CLI global-linear verified"
+
+say "Run CLI: global-affine"
+CLI_AFFINE=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- global-affine --query ACB --target A --match 2 --mismatch-penalty 1 --gap-open -3 --gap-extend -1 --verify --format json)
+assert_eq "$(printf '%s' "$CLI_AFFINE" | json_field score)" "-3" "CLI global-affine score"
+assert_eq "$(printf '%s' "$CLI_AFFINE" | json_field verified)" "true" "CLI global-affine verified"
+
+say "Run CLI: local-linear"
+CLI_SW=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- local-linear --query ACACACTA --target AGCACACA --match 2 --mismatch-penalty 1 --gap -2 --verify --format json)
+assert_eq "$(printf '%s' "$CLI_SW" | json_field score)" "10" "CLI local-linear score"
+assert_eq "$(printf '%s' "$CLI_SW" | json_field verified)" "true" "CLI local-linear verified"
+
+say "Run CLI: edit-distance"
+CLI_EDIT=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- edit-distance --query kitten --target sitting --verify --format json)
+assert_eq "$(printf '%s' "$CLI_EDIT" | json_field distance)" "3" "CLI edit-distance distance"
+assert_eq "$(printf '%s' "$CLI_EDIT" | json_field verified)" "true" "CLI edit-distance verified"
+
+say "Run CLI: semiglobal-linear"
+CLI_SEMI=$(cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- semiglobal-linear --query ACGT --target TTACGTTT --match 2 --mismatch-penalty 1 --gap -2 --verify --format json)
+assert_eq "$(printf '%s' "$CLI_SEMI" | json_field score)" "8" "CLI semiglobal-linear score"
+assert_eq "$(printf '%s' "$CLI_SEMI" | json_field target_start)" "2" "CLI semiglobal target start"
+assert_eq "$(printf '%s' "$CLI_SEMI" | json_field target_end)" "6" "CLI semiglobal target end"
+assert_eq "$(printf '%s' "$CLI_SEMI" | json_field verified)" "true" "CLI semiglobal-linear verified"
 
 say "Run scale probe smoke"
 cargo_with_features run --quiet --bin scale_probe ${RELEASE_FLAG:-} -- --format table --verify-limit 128 >/dev/null

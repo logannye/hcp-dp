@@ -1,13 +1,21 @@
-use std::env;
-use std::time::Instant;
+use std::{
+    env,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
 use hcp_dp::{
     problems::{
-        lcs::LcsProblem, nw_affine::NwAffineProblem, nw_align::NwProblem,
-        smith_waterman::SmithWatermanProblem,
+        edit_distance::EditDistanceProblem, lcs::LcsProblem, nw_affine::NwAffineProblem,
+        nw_align::NwProblem, semiglobal::SemiGlobalProblem, smith_waterman::SmithWatermanProblem,
     },
     HcpEngine,
 };
+use serde::Serialize;
 use sysinfo::{get_current_pid, ProcessRefreshKind, System};
 
 const AFFINE_NEG_INF: i32 = i32::MIN / 4;
@@ -25,13 +33,35 @@ fn main() {
     eprintln!("HCP-DP scale probe");
     eprintln!("Verified means: baseline objective matches and returned path realizes it.");
     eprintln!("Verification limit: {}", options.verify_limit);
+    if let Some(scenario) = &options.scenario {
+        eprintln!("Scenario filter: {scenario}");
+    }
 
     let mut sys = System::new();
     let mut measurements = Vec::new();
-    measurements.extend(run_lcs(&options, &mut sys));
-    measurements.extend(run_nw(&options, &mut sys));
-    measurements.extend(run_smith_waterman(&options, &mut sys));
-    measurements.extend(run_affine_nw(&options, &mut sys));
+    if options.should_run("lcs") {
+        measurements.extend(run_lcs(&options, &mut sys));
+    }
+    if options.should_run("needleman_wunsch") {
+        measurements.extend(run_nw(&options, &mut sys));
+    }
+    if options.should_run("smith_waterman") {
+        measurements.extend(run_smith_waterman(&options, &mut sys));
+    }
+    if options.should_run("needleman_wunsch_affine") {
+        measurements.extend(run_affine_nw(&options, &mut sys));
+    }
+    if options.should_run("edit_distance") {
+        measurements.extend(run_edit_distance(&options, &mut sys));
+    }
+    if options.should_run("semiglobal") {
+        measurements.extend(run_semiglobal(&options, &mut sys));
+    }
+
+    if measurements.is_empty() {
+        eprintln!("scale_probe: no measurements selected");
+        std::process::exit(2);
+    }
 
     if measurements
         .iter()
@@ -52,6 +82,7 @@ fn main() {
 struct Options {
     format: OutputFormat,
     verify_limit: usize,
+    scenario: Option<String>,
 }
 
 impl Options {
@@ -62,6 +93,7 @@ impl Options {
     {
         let mut format = OutputFormat::Csv;
         let mut verify_limit = 512;
+        let mut scenario = None;
 
         while let Some(arg) = args.next() {
             let arg = arg.into();
@@ -84,6 +116,14 @@ impl Options {
                 verify_limit = parse_limit(&value)?;
             } else if let Some(value) = arg.strip_prefix("--verify-limit=") {
                 verify_limit = parse_limit(value)?;
+            } else if arg == "--scenario" {
+                scenario = Some(
+                    args.next()
+                        .ok_or_else(|| "missing value after --scenario".to_string())?
+                        .into(),
+                );
+            } else if let Some(value) = arg.strip_prefix("--scenario=") {
+                scenario = Some(value.to_string());
             } else {
                 return Err(format!("unrecognized argument '{arg}'"));
             }
@@ -92,7 +132,14 @@ impl Options {
         Ok(Self {
             format,
             verify_limit,
+            scenario,
         })
+    }
+
+    fn should_run(&self, scenario: &str) -> bool {
+        self.scenario
+            .as_deref()
+            .is_none_or(|filter| filter == scenario)
     }
 
     fn print_help() {
@@ -103,6 +150,9 @@ Usage: cargo run --bin scale_probe -- [options]
 Options:
   --format <csv|table|json>  Output format (default: csv)
   --verify-limit <N>         Largest size checked against full-table baselines (default: 512)
+  --scenario <name>          Run only one scenario: lcs, needleman_wunsch,
+                             smith_waterman, needleman_wunsch_affine,
+                             edit_distance, semiglobal
   -h, --help                 Print this help
 "
         );
@@ -141,16 +191,19 @@ impl OutputFormat {
     }
 }
 
+#[derive(Serialize)]
 struct Measurement {
     scenario: &'static str,
     size: usize,
     wall_s: f64,
-    rss_delta_kib: u64,
+    rss_delta_bytes: u64,
+    peak_rss_bytes: u64,
     status: VerificationStatus,
     detail: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
 enum VerificationStatus {
     Passed,
     Failed,
@@ -354,27 +407,143 @@ fn run_affine_nw(options: &Options, sys: &mut System) -> Vec<Measurement> {
         .collect()
 }
 
+fn run_edit_distance(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    const SIZES: &[usize] = &[64, 128, 256, 512, 1024, 2048, 4096];
+    SIZES
+        .iter()
+        .map(|&len| {
+            measure("edit_distance", len, sys, || {
+                let s = deterministic_dna(len);
+                let t = deterministic_dna_offset(len, 1);
+                let problem = EditDistanceProblem::new(&s, &t);
+                let (distance, path) = HcpEngine::new(problem.clone()).run();
+                if len <= options.verify_limit {
+                    let baseline = full_edit_distance(&s, &t);
+                    let path_score = problem.score_path(&path);
+                    if baseline == distance && path_score == Some(distance) {
+                        (VerificationStatus::Passed, format!("distance={distance}"))
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!(
+                                "baseline={baseline}, distance={distance}, path_score={path_score:?}"
+                            ),
+                        )
+                    }
+                } else {
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(distance) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("distance={distance}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("distance={distance}, path_score={path_score:?}"),
+                        )
+                    }
+                }
+            })
+        })
+        .collect()
+}
+
+fn run_semiglobal(options: &Options, sys: &mut System) -> Vec<Measurement> {
+    const SIZES: &[usize] = &[64, 128, 256, 512, 1024];
+    const MATCH_SCORE: i32 = 2;
+    const MISMATCH_PENALTY: i32 = 1;
+    const GAP_PENALTY: i32 = -2;
+    SIZES
+        .iter()
+        .map(|&len| {
+            measure("semiglobal", len, sys, || {
+                let s = deterministic_dna(len);
+                let t = deterministic_dna_offset(len + len / 4, 2);
+                let problem =
+                    SemiGlobalProblem::new(&s, &t, MATCH_SCORE, MISMATCH_PENALTY, GAP_PENALTY);
+                let (cost, path) = HcpEngine::new(problem.clone()).run();
+                if len <= options.verify_limit {
+                    let baseline =
+                        full_semiglobal_score(&s, &t, MATCH_SCORE, MISMATCH_PENALTY, GAP_PENALTY);
+                    let path_score = problem.score_path(&path);
+                    if baseline == cost && path_score == Some(cost) {
+                        (VerificationStatus::Passed, format!("cost={cost}"))
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("baseline={baseline}, cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                } else {
+                    let path_score = problem.score_path(&path);
+                    if path_score == Some(cost) {
+                        (
+                            VerificationStatus::NotChecked,
+                            format!("cost={cost}, path_len={}", path.len()),
+                        )
+                    } else {
+                        (
+                            VerificationStatus::Failed,
+                            format!("cost={cost}, path_score={path_score:?}"),
+                        )
+                    }
+                }
+            })
+        })
+        .collect()
+}
+
 fn measure<F>(scenario: &'static str, size: usize, sys: &mut System, run: F) -> Measurement
 where
     F: FnOnce() -> (VerificationStatus, String),
 {
-    let before = rss_kib(sys);
+    let before = rss_bytes(sys);
+    let stop = Arc::new(AtomicBool::new(false));
+    let peak = Arc::new(AtomicU64::new(before));
+    let sampler = spawn_rss_sampler(Arc::clone(&stop), Arc::clone(&peak));
     let start = Instant::now();
     let (status, detail) = run();
     let wall_s = start.elapsed().as_secs_f64();
-    let after = rss_kib(sys);
+    stop.store(true, Ordering::Relaxed);
+    let _ = sampler.join();
+    let after = rss_bytes(sys);
+    let peak_rss_bytes = peak.load(Ordering::Relaxed).max(after).max(before);
     Measurement {
         scenario,
         size,
         wall_s,
-        rss_delta_kib: after.saturating_sub(before),
+        rss_delta_bytes: after.saturating_sub(before),
+        peak_rss_bytes,
         status,
         detail,
     }
 }
 
-fn rss_kib(sys: &mut System) -> u64 {
-    sys.refresh_processes_specifics(ProcessRefreshKind::new());
+fn spawn_rss_sampler(stop: Arc<AtomicBool>, peak: Arc<AtomicU64>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut sys = System::new();
+        while !stop.load(Ordering::Relaxed) {
+            let current = rss_bytes(&mut sys);
+            let mut observed = peak.load(Ordering::Relaxed);
+            while current > observed {
+                match peak.compare_exchange_weak(
+                    observed,
+                    current,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(next) => observed = next,
+                }
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    })
+}
+
+fn rss_bytes(sys: &mut System) -> u64 {
+    sys.refresh_processes_specifics(ProcessRefreshKind::new().with_memory());
     get_current_pid()
         .ok()
         .and_then(|pid| sys.process(pid).map(|process| process.memory()))
@@ -451,6 +620,50 @@ fn full_sw_score(s: &[u8], t: &[u8], match_score: i32, mismatch_penalty: i32, ga
         std::mem::swap(&mut prev, &mut curr);
     }
     best
+}
+
+fn full_edit_distance(s: &[u8], t: &[u8]) -> u32 {
+    let mut prev: Vec<u32> = (0..=t.len() as u32).collect();
+    let mut curr = vec![0; t.len() + 1];
+    for (row, &a) in s.iter().enumerate() {
+        curr[0] = row as u32 + 1;
+        for col in 1..=t.len() {
+            let subst = u32::from(a != t[col - 1]);
+            let diag = prev[col - 1] + subst;
+            let delete = prev[col] + 1;
+            let insert = curr[col - 1] + 1;
+            curr[col] = diag.min(delete).min(insert);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[t.len()]
+}
+
+fn full_semiglobal_score(
+    s: &[u8],
+    t: &[u8],
+    match_score: i32,
+    mismatch_penalty: i32,
+    gap: i32,
+) -> i32 {
+    let mut prev = vec![0; t.len() + 1];
+    let mut curr = vec![0; t.len() + 1];
+    for &a in s {
+        curr[0] = prev[0] + gap;
+        for col in 1..=t.len() {
+            let pair = if a == t[col - 1] {
+                match_score
+            } else {
+                -mismatch_penalty
+            };
+            let diag = prev[col - 1] + pair;
+            let up = prev[col] + gap;
+            let left = curr[col - 1] + gap;
+            curr[col] = diag.max(up).max(left);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev.into_iter().max().unwrap_or(0)
 }
 
 fn full_affine_nw_score(
@@ -550,25 +763,27 @@ fn affine_add(base: i32, delta: i32) -> i32 {
 fn print_summary(measurements: &[Measurement]) {
     for measurement in measurements {
         eprintln!(
-            "{},{},{:.4},{},{}",
+            "{},{},{:.4},{},{},{}",
             measurement.scenario,
             measurement.size,
             measurement.wall_s,
-            measurement.rss_delta_kib,
+            measurement.rss_delta_bytes,
+            measurement.peak_rss_bytes,
             measurement.status.label()
         );
     }
 }
 
 fn write_csv(measurements: &[Measurement]) -> Result<(), String> {
-    println!("scenario,size,wall_s,rss_delta_kib,status,detail");
+    println!("scenario,size,wall_s,rss_delta_bytes,peak_rss_bytes,status,detail");
     for measurement in measurements {
         println!(
-            "{},{},{:.6},{},{},{}",
+            "{},{},{:.6},{},{},{},{}",
             measurement.scenario,
             measurement.size,
             measurement.wall_s,
-            measurement.rss_delta_kib,
+            measurement.rss_delta_bytes,
+            measurement.peak_rss_bytes,
             measurement.status.label(),
             escape_csv(&measurement.detail)
         );
@@ -578,16 +793,17 @@ fn write_csv(measurements: &[Measurement]) -> Result<(), String> {
 
 fn write_table(measurements: &[Measurement]) -> Result<(), String> {
     println!(
-        "{:<20} {:>8} {:>10} {:>14} {:<12} detail",
-        "scenario", "size", "wall_s", "rss_delta", "status"
+        "{:<26} {:>8} {:>10} {:>14} {:>14} {:<12} detail",
+        "scenario", "size", "wall_s", "rss_delta_b", "peak_rss_b", "status"
     );
     for measurement in measurements {
         println!(
-            "{:<20} {:>8} {:>10.4} {:>14} {:<12} {}",
+            "{:<26} {:>8} {:>10.4} {:>14} {:>14} {:<12} {}",
             measurement.scenario,
             measurement.size,
             measurement.wall_s,
-            measurement.rss_delta_kib,
+            measurement.rss_delta_bytes,
+            measurement.peak_rss_bytes,
             measurement.status.label(),
             measurement.detail
         );
@@ -596,25 +812,8 @@ fn write_table(measurements: &[Measurement]) -> Result<(), String> {
 }
 
 fn write_json(measurements: &[Measurement]) -> Result<(), String> {
-    println!("[");
-    for (idx, measurement) in measurements.iter().enumerate() {
-        let comma = if idx + 1 == measurements.len() {
-            ""
-        } else {
-            ","
-        };
-        println!(
-            "  {{\"scenario\":\"{}\",\"size\":{},\"wall_s\":{:.6},\"rss_delta_kib\":{},\"status\":\"{}\",\"detail\":\"{}\"}}{}",
-            measurement.scenario,
-            measurement.size,
-            measurement.wall_s,
-            measurement.rss_delta_kib,
-            measurement.status.label(),
-            escape_json(&measurement.detail),
-            comma
-        );
-    }
-    println!("]");
+    let json = serde_json::to_string_pretty(measurements).map_err(|err| err.to_string())?;
+    println!("{json}");
     Ok(())
 }
 
@@ -624,11 +823,4 @@ fn escape_csv(value: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn escape_json(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
 }

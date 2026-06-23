@@ -3,8 +3,9 @@
 //! This crate is an alpha-stage correctness rebuild. The public surface is
 //! intentionally small: a generic summary-tree engine plus correctness-tested
 //! reference implementations for LCS, linear and affine-gap Needleman-Wunsch,
-//! and linear-gap Smith-Waterman.
+//! linear-gap Smith-Waterman, edit distance, and semi-global alignment.
 
+pub mod alignment;
 pub mod blocks;
 pub mod builder;
 pub mod engine;

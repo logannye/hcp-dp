@@ -1,7 +1,8 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use hcp_dp::{
     problems::{
-        nw_affine::NwAffineProblem, nw_align::NwProblem, smith_waterman::SmithWatermanProblem,
+        edit_distance::EditDistanceProblem, nw_affine::NwAffineProblem, nw_align::NwProblem,
+        semiglobal::SemiGlobalProblem, smith_waterman::SmithWatermanProblem,
     },
     HcpEngine,
 };
@@ -18,9 +19,9 @@ fn random_dna(rng: &mut StdRng, len: usize) -> Vec<u8> {
         .collect()
 }
 
-fn rss_kib() -> u64 {
+fn rss_bytes() -> u64 {
     let mut sys = System::new();
-    sys.refresh_processes_specifics(ProcessRefreshKind::new());
+    sys.refresh_processes_specifics(ProcessRefreshKind::new().with_memory());
     if let Some(p) = sys.process(get_current_pid().unwrap()) {
         p.memory()
     } else {
@@ -40,13 +41,16 @@ fn bench_nw_perf(c: &mut Criterion) {
                     (s, t)
                 },
                 |(s, t)| {
-                    let before = rss_kib();
+                    let before = rss_bytes();
                     let problem = NwProblem::new(&s, &t, 1, 1, -1);
                     let engine = HcpEngine::new(problem);
                     let (score, _path) = engine.run();
-                    let after = rss_kib();
+                    let after = rss_bytes();
                     criterion::black_box(score);
-                    eprintln!("RSS KiB delta (nw {len}): {}", after.saturating_sub(before));
+                    eprintln!(
+                        "RSS bytes delta (nw {len}): {}",
+                        after.saturating_sub(before)
+                    );
                 },
                 BatchSize::PerIteration,
             )
@@ -67,14 +71,14 @@ fn bench_affine_nw_perf(c: &mut Criterion) {
                     (s, t)
                 },
                 |(s, t)| {
-                    let before = rss_kib();
+                    let before = rss_bytes();
                     let problem = NwAffineProblem::new(&s, &t, 2, 1, -3, -1);
                     let engine = HcpEngine::new(problem);
                     let (score, _path) = engine.run();
-                    let after = rss_kib();
+                    let after = rss_bytes();
                     criterion::black_box(score);
                     eprintln!(
-                        "RSS KiB delta (affine nw {len}): {}",
+                        "RSS bytes delta (affine nw {len}): {}",
                         after.saturating_sub(before)
                     );
                 },
@@ -97,14 +101,74 @@ fn bench_smith_waterman_perf(c: &mut Criterion) {
                     (s, t)
                 },
                 |(s, t)| {
-                    let before = rss_kib();
+                    let before = rss_bytes();
                     let problem = SmithWatermanProblem::new(&s, &t, 2, 1, -2);
                     let engine = HcpEngine::new(problem);
                     let (score, _path) = engine.run();
-                    let after = rss_kib();
+                    let after = rss_bytes();
                     criterion::black_box(score);
                     eprintln!(
-                        "RSS KiB delta (smith-waterman {len}): {}",
+                        "RSS bytes delta (smith-waterman {len}): {}",
+                        after.saturating_sub(before)
+                    );
+                },
+                BatchSize::PerIteration,
+            )
+        });
+    }
+    group.finish();
+}
+
+fn bench_edit_distance_perf(c: &mut Criterion) {
+    let mut group = c.benchmark_group("edit_distance_perf_height_compressed");
+    for &len in &[1_000usize, 5_000] {
+        group.bench_function(format!("edit_distance_len_{len}"), |b| {
+            b.iter_batched(
+                || {
+                    let mut rng = StdRng::seed_from_u64(46);
+                    let s = random_dna(&mut rng, len);
+                    let t = random_dna(&mut rng, len);
+                    (s, t)
+                },
+                |(s, t)| {
+                    let before = rss_bytes();
+                    let problem = EditDistanceProblem::new(&s, &t);
+                    let engine = HcpEngine::new(problem);
+                    let (distance, _path) = engine.run();
+                    let after = rss_bytes();
+                    criterion::black_box(distance);
+                    eprintln!(
+                        "RSS bytes delta (edit distance {len}): {}",
+                        after.saturating_sub(before)
+                    );
+                },
+                BatchSize::PerIteration,
+            )
+        });
+    }
+    group.finish();
+}
+
+fn bench_semiglobal_perf(c: &mut Criterion) {
+    let mut group = c.benchmark_group("semiglobal_perf_height_compressed");
+    for &len in &[1_000usize, 2_000] {
+        group.bench_function(format!("semiglobal_len_{len}"), |b| {
+            b.iter_batched(
+                || {
+                    let mut rng = StdRng::seed_from_u64(47);
+                    let s = random_dna(&mut rng, len);
+                    let t = random_dna(&mut rng, len + len / 4);
+                    (s, t)
+                },
+                |(s, t)| {
+                    let before = rss_bytes();
+                    let problem = SemiGlobalProblem::new(&s, &t, 2, 1, -2);
+                    let engine = HcpEngine::new(problem);
+                    let (score, _path) = engine.run();
+                    let after = rss_bytes();
+                    criterion::black_box(score);
+                    eprintln!(
+                        "RSS bytes delta (semiglobal {len}): {}",
                         after.saturating_sub(before)
                     );
                 },
@@ -119,6 +183,8 @@ criterion_group!(
     benches,
     bench_nw_perf,
     bench_smith_waterman_perf,
-    bench_affine_nw_perf
+    bench_affine_nw_perf,
+    bench_edit_distance_perf,
+    bench_semiglobal_perf
 );
 criterion_main!(benches);

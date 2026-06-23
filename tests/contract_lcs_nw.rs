@@ -1,39 +1,21 @@
 use hcp_dp::{
     problems::{
+        edit_distance::{EditDistanceProblem, EditDistanceState},
         lcs::{LcsProblem, LcsState},
-        nw_affine::{NwAffineFrontier, NwAffineProblem, NwAffineState},
+        nw_affine::{NwAffineProblem, NwAffineState},
         nw_align::{NwProblem, NwState},
-        smith_waterman::{SmithWatermanProblem, SwCell, SwFrontier},
+        semiglobal::{SemiGlobalCell, SemiGlobalProblem},
+        smith_waterman::{SmithWatermanProblem, SwCell},
     },
     HcpEngine, HcpProblem, SummaryApply,
 };
 use proptest::prelude::*;
+use std::fmt::Debug;
 
-fn lcs_frontier_after(problem: &LcsProblem<'_>, a: usize) -> Vec<u32> {
-    let mut frontier = problem.init_frontier();
-    for layer in 0..a {
-        frontier = problem.forward_step(layer, &frontier);
-    }
-    frontier.scores
-}
-
-fn nw_frontier_after(problem: &NwProblem<'_>, a: usize) -> Vec<i32> {
-    let mut frontier = problem.init_frontier();
-    for layer in 0..a {
-        frontier = problem.forward_step(layer, &frontier);
-    }
-    frontier.scores
-}
-
-fn affine_frontier_after(problem: &NwAffineProblem<'_>, a: usize) -> NwAffineFrontier {
-    let mut frontier = problem.init_frontier();
-    for layer in 0..a {
-        frontier = problem.forward_step(layer, &frontier);
-    }
-    frontier
-}
-
-fn sw_frontier_after(problem: &SmithWatermanProblem<'_>, a: usize) -> SwFrontier {
+fn frontier_after<P>(problem: &P, a: usize) -> P::Frontier
+where
+    P: HcpProblem,
+{
     let mut frontier = problem.init_frontier();
     for layer in 0..a {
         frontier = problem.forward_step(layer, &frontier);
@@ -82,94 +64,41 @@ fn assert_sw_path(problem: &SmithWatermanProblem<'_>, cost: i32, path: &[SwCell]
     assert_eq!(problem.score_path(path), Some(cost));
 }
 
-fn assert_lcs_summary_contract(problem: &LcsProblem<'_>) {
-    let n = problem.n();
-    for a in 0..=n {
-        let mut frontier_a = problem.init_frontier();
-        for layer in 0..a {
-            frontier_a = problem.forward_step(layer, &frontier_a);
-        }
-
-        for b in a..=n {
-            let sigma_ab = problem.summarize_interval(a, b);
-            let mut direct = frontier_a.clone();
-            for layer in a..b {
-                direct = problem.forward_step(layer, &direct);
-            }
-            assert_eq!(sigma_ab.apply(&frontier_a).scores, direct.scores);
-
-            for c in b..=n {
-                let sigma_bc = problem.summarize_interval(b, c);
-                let merged = problem.merge_summary(&sigma_ab, &sigma_bc);
-                let mut direct_ac = frontier_a.clone();
-                for layer in a..c {
-                    direct_ac = problem.forward_step(layer, &direct_ac);
-                }
-                assert_eq!(merged.apply(&frontier_a).scores, direct_ac.scores);
-            }
-        }
-    }
+fn assert_edit_path(problem: &EditDistanceProblem<'_>, cost: u32, path: &[EditDistanceState]) {
+    assert_eq!(cost, problem.full_table_distance());
+    assert_eq!(path.first(), Some(&(0, 0)));
+    assert_eq!(path.last(), Some(&(problem.n(), problem.m())));
+    assert_eq!(problem.score_path(path), Some(cost));
 }
 
-fn assert_nw_summary_contract(problem: &NwProblem<'_>) {
-    let n = problem.n();
-    for a in 0..=n {
-        let mut frontier_a = problem.init_frontier();
-        for layer in 0..a {
-            frontier_a = problem.forward_step(layer, &frontier_a);
-        }
-
-        for b in a..=n {
-            let sigma_ab = problem.summarize_interval(a, b);
-            let mut direct = frontier_a.clone();
-            for layer in a..b {
-                direct = problem.forward_step(layer, &direct);
-            }
-            assert_eq!(sigma_ab.apply(&frontier_a).scores, direct.scores);
-
-            for c in b..=n {
-                let sigma_bc = problem.summarize_interval(b, c);
-                let merged = problem.merge_summary(&sigma_ab, &sigma_bc);
-                let mut direct_ac = frontier_a.clone();
-                for layer in a..c {
-                    direct_ac = problem.forward_step(layer, &direct_ac);
-                }
-                assert_eq!(merged.apply(&frontier_a).scores, direct_ac.scores);
-            }
-        }
-    }
+fn assert_semiglobal_path(problem: &SemiGlobalProblem<'_>, cost: i32, path: &[SemiGlobalCell]) {
+    assert_eq!(cost, problem.full_table_score());
+    let (target_start, target_end) = problem.full_table_target_interval();
+    assert_eq!(
+        path.first(),
+        Some(&SemiGlobalCell {
+            row: 0,
+            col: target_start,
+        })
+    );
+    assert_eq!(
+        path.last(),
+        Some(&SemiGlobalCell {
+            row: problem.n(),
+            col: target_end,
+        })
+    );
+    assert_eq!(problem.score_path(path), Some(cost));
 }
 
-fn assert_affine_summary_contract(problem: &NwAffineProblem<'_>) {
-    let n = problem.n();
+fn assert_summary_contract<P>(problem: &P)
+where
+    P: HcpProblem,
+    P::Frontier: Debug + PartialEq,
+{
+    let n = problem.num_layers();
     for a in 0..=n {
-        let frontier_a = affine_frontier_after(problem, a);
-
-        for b in a..=n {
-            let sigma_ab = problem.summarize_interval(a, b);
-            let mut direct = frontier_a.clone();
-            for layer in a..b {
-                direct = problem.forward_step(layer, &direct);
-            }
-            assert_eq!(sigma_ab.apply(&frontier_a), direct);
-
-            for c in b..=n {
-                let sigma_bc = problem.summarize_interval(b, c);
-                let merged = problem.merge_summary(&sigma_ab, &sigma_bc);
-                let mut direct_ac = frontier_a.clone();
-                for layer in a..c {
-                    direct_ac = problem.forward_step(layer, &direct_ac);
-                }
-                assert_eq!(merged.apply(&frontier_a), direct_ac);
-            }
-        }
-    }
-}
-
-fn assert_sw_summary_contract(problem: &SmithWatermanProblem<'_>) {
-    let n = problem.n();
-    for a in 0..=n {
-        let frontier_a = sw_frontier_after(problem, a);
+        let frontier_a = frontier_after(problem, a);
 
         for b in a..=n {
             let sigma_ab = problem.summarize_interval(a, b);
@@ -199,10 +128,8 @@ fn assert_lcs_split_contract(problem: &LcsProblem<'_>) {
     }
     let mid = n / 2;
     let beta_a = problem.initial_boundary();
-    let frontier_t_scores = lcs_frontier_after(problem, n);
-    let beta_c = problem.terminal_boundary(&hcp_dp::problems::lcs::LcsFrontier {
-        scores: frontier_t_scores,
-    });
+    let frontier_t = frontier_after(problem, n);
+    let beta_c = problem.terminal_boundary(&frontier_t);
     let sigma_left = problem.summarize_interval(0, mid);
     let sigma_right = problem.summarize_interval(mid, n);
     let beta_m = problem.choose_split(0, mid, n, &beta_a, &beta_c, &sigma_left, &sigma_right);
@@ -220,10 +147,8 @@ fn assert_nw_split_contract(problem: &NwProblem<'_>) {
     }
     let mid = n / 2;
     let beta_a = problem.initial_boundary();
-    let frontier_t_scores = nw_frontier_after(problem, n);
-    let beta_c = problem.terminal_boundary(&hcp_dp::problems::nw_align::NwFrontier {
-        scores: frontier_t_scores,
-    });
+    let frontier_t = frontier_after(problem, n);
+    let beta_c = problem.terminal_boundary(&frontier_t);
     let sigma_left = problem.summarize_interval(0, mid);
     let sigma_right = problem.summarize_interval(mid, n);
     let beta_m = problem.choose_split(0, mid, n, &beta_a, &beta_c, &sigma_left, &sigma_right);
@@ -241,7 +166,7 @@ fn assert_affine_split_contract(problem: &NwAffineProblem<'_>) {
     }
     let mid = n / 2;
     let beta_a = problem.initial_boundary();
-    let frontier_t = affine_frontier_after(problem, n);
+    let frontier_t = frontier_after(problem, n);
     let beta_c = problem.terminal_boundary(&frontier_t);
     let sigma_left = problem.summarize_interval(0, mid);
     let sigma_right = problem.summarize_interval(mid, n);
@@ -260,7 +185,7 @@ fn assert_sw_split_contract(problem: &SmithWatermanProblem<'_>) {
     }
     let mid = n / 2;
     let beta_a = problem.initial_boundary();
-    let frontier_t = sw_frontier_after(problem, n);
+    let frontier_t = frontier_after(problem, n);
     let beta_c = problem.terminal_boundary(&frontier_t);
     let sigma_left = problem.summarize_interval(0, mid);
     let sigma_right = problem.summarize_interval(mid, n);
@@ -278,11 +203,49 @@ fn assert_sw_split_contract(problem: &SmithWatermanProblem<'_>) {
     assert_sw_path(problem, problem.full_table_score(), &joined);
 }
 
+fn assert_edit_split_contract(problem: &EditDistanceProblem<'_>) {
+    let n = problem.n();
+    if n < 2 {
+        return;
+    }
+    let mid = n / 2;
+    let beta_a = problem.initial_boundary();
+    let frontier_t = frontier_after(problem, n);
+    let beta_c = problem.terminal_boundary(&frontier_t);
+    let sigma_left = problem.summarize_interval(0, mid);
+    let sigma_right = problem.summarize_interval(mid, n);
+    let beta_m = problem.choose_split(0, mid, n, &beta_a, &beta_c, &sigma_left, &sigma_right);
+    let mut left = problem.reconstruct_leaf(0, mid, &beta_a, &beta_m);
+    let right = problem.reconstruct_leaf(mid, n, &beta_m, &beta_c);
+    assert_eq!(left.last(), right.first());
+    left.extend_from_slice(&right[1..]);
+    assert_edit_path(problem, problem.full_table_distance(), &left);
+}
+
+fn assert_semiglobal_split_contract(problem: &SemiGlobalProblem<'_>) {
+    let n = problem.n();
+    if n < 2 {
+        return;
+    }
+    let mid = n / 2;
+    let beta_a = problem.initial_boundary();
+    let frontier_t = frontier_after(problem, n);
+    let beta_c = problem.terminal_boundary(&frontier_t);
+    let sigma_left = problem.summarize_interval(0, mid);
+    let sigma_right = problem.summarize_interval(mid, n);
+    let beta_m = problem.choose_split(0, mid, n, &beta_a, &beta_c, &sigma_left, &sigma_right);
+    let mut left = problem.reconstruct_leaf(0, mid, &beta_a, &beta_m);
+    let right = problem.reconstruct_leaf(mid, n, &beta_m, &beta_c);
+    assert_eq!(left.last(), right.first());
+    left.extend_from_slice(&right[1..]);
+    assert_semiglobal_path(problem, problem.full_table_score(), &left);
+}
+
 proptest! {
     #[test]
     fn lcs_contracts_hold(a in "[ACGT]{0,8}", b in "[ACGT]{0,8}") {
         let problem = LcsProblem::new(a.as_bytes(), b.as_bytes());
-        assert_lcs_summary_contract(&problem);
+        assert_summary_contract(&problem);
         assert_lcs_split_contract(&problem);
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
@@ -293,7 +256,7 @@ proptest! {
     #[test]
     fn nw_contracts_hold(a in "[ACGT]{0,7}", b in "[ACGT]{0,7}") {
         let problem = NwProblem::new(a.as_bytes(), b.as_bytes(), 2, 1, -2);
-        assert_nw_summary_contract(&problem);
+        assert_summary_contract(&problem);
         assert_nw_split_contract(&problem);
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
@@ -304,7 +267,7 @@ proptest! {
     #[test]
     fn affine_contracts_hold(a in "[ACGT]{0,6}", b in "[ACGT]{0,6}") {
         let problem = NwAffineProblem::new(a.as_bytes(), b.as_bytes(), 2, 1, -3, -1);
-        assert_affine_summary_contract(&problem);
+        assert_summary_contract(&problem);
         assert_affine_split_contract(&problem);
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
@@ -315,11 +278,33 @@ proptest! {
     #[test]
     fn smith_waterman_contracts_hold(a in "[ACGT]{0,6}", b in "[ACGT]{0,6}") {
         let problem = SmithWatermanProblem::new(a.as_bytes(), b.as_bytes(), 2, 1, -2);
-        assert_sw_summary_contract(&problem);
+        assert_summary_contract(&problem);
         assert_sw_split_contract(&problem);
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
             assert_sw_path(&problem, cost, &path);
+        }
+    }
+
+    #[test]
+    fn edit_distance_contracts_hold(a in "[ACGT]{0,7}", b in "[ACGT]{0,7}") {
+        let problem = EditDistanceProblem::new(a.as_bytes(), b.as_bytes());
+        assert_summary_contract(&problem);
+        assert_edit_split_contract(&problem);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_edit_path(&problem, cost, &path);
+        }
+    }
+
+    #[test]
+    fn semiglobal_contracts_hold(a in "[ACGT]{0,6}", b in "[ACGT]{0,8}") {
+        let problem = SemiGlobalProblem::new(a.as_bytes(), b.as_bytes(), 2, 1, -2);
+        assert_summary_contract(&problem);
+        assert_semiglobal_split_contract(&problem);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_semiglobal_path(&problem, cost, &path);
         }
     }
 }
@@ -343,6 +328,17 @@ fn audit_regressions_are_fixed() {
     let (sw_cost, sw_path) = HcpEngine::new(sw.clone()).run();
     assert_eq!(sw_cost, 10);
     assert_sw_path(&sw, sw_cost, &sw_path);
+
+    let edit = EditDistanceProblem::new(b"kitten", b"sitting");
+    let (edit_cost, edit_path) = HcpEngine::new(edit.clone()).run();
+    assert_eq!(edit_cost, 3);
+    assert_edit_path(&edit, edit_cost, &edit_path);
+
+    let semi = SemiGlobalProblem::new(b"ACGT", b"TTACGTTT", 2, 1, -2);
+    let (semi_cost, semi_path) = HcpEngine::new(semi.clone()).run();
+    assert_eq!(semi_cost, 8);
+    assert_eq!(semi.full_table_target_interval(), (2, 6));
+    assert_semiglobal_path(&semi, semi_cost, &semi_path);
 }
 
 #[test]
@@ -385,6 +381,51 @@ fn smith_waterman_edge_cases_hold() {
         for block_size in 1..=problem.n().max(1) {
             let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
             assert_sw_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
+fn edit_distance_edge_cases_hold() {
+    let cases: &[(&[u8], &[u8])] = &[
+        (b"", b""),
+        (b"", b"ABC"),
+        (b"ABC", b""),
+        (b"kitten", b"sitting"),
+        (b"AAAAAA", b"AAA"),
+        (b"ACGTACGT", b"TGCATGCA"),
+        (b"ACGTACGT", b"ACGT"),
+        (b"GGGGTTTT", b"GGTT"),
+    ];
+
+    for (s, t) in cases {
+        let problem = EditDistanceProblem::new(s, t);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_edit_path(&problem, cost, &path);
+        }
+    }
+}
+
+#[test]
+fn semiglobal_edge_cases_hold() {
+    type SemiCase<'a> = (&'a [u8], &'a [u8], i32, i32, i32);
+    let cases: &[SemiCase<'_>] = &[
+        (b"", b"", 2, 1, -2),
+        (b"", b"ABC", 2, 1, -2),
+        (b"ABC", b"", 2, 1, -2),
+        (b"ACGT", b"TTACGTTT", 2, 1, -2),
+        (b"AAAA", b"TTAAAATT", 2, 1, -2),
+        (b"ACGTAC", b"GGACGT", 2, 1, -2),
+        (b"GGGG", b"TTTT", 1, 1, -2),
+        (b"ACGT", b"ACGT", 2, 1, -2),
+    ];
+
+    for (s, t, match_score, mismatch_penalty, gap_penalty) in cases {
+        let problem = SemiGlobalProblem::new(s, t, *match_score, *mismatch_penalty, *gap_penalty);
+        for block_size in 1..=problem.n().max(1) {
+            let (cost, path) = HcpEngine::with_block_size(problem.clone(), block_size).run();
+            assert_semiglobal_path(&problem, cost, &path);
         }
     }
 }

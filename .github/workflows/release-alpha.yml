@@ -43,7 +43,7 @@ jobs:
           from pathlib import Path
           path = Path("target/alpha/${{ matrix.artifact }}.tar.gz")
           digest = hashlib.sha256(path.read_bytes()).hexdigest()
-          path.with_suffix(path.suffix + ".sha256").write_text(f"{digest}  {path.name}\n", encoding="utf-8")
+          path.with_suffix(path.suffix + ".sha256").write_bytes(f"{digest}  {path.name}\n".encode("utf-8"))
           PY
       - name: Upload binary artifact
         uses: actions/upload-artifact@v6

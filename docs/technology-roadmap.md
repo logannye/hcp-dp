@@ -5,7 +5,8 @@ external evidence.
 
 ## `0.2.0-alpha.1`: trustworthy oracle contract
 
-Status: released contract implemented.
+Status: implementation complete; superseded by `0.2.0-alpha.2` before
+publication.
 
 - Canonical scoring, spans, provenance, objectives, and SAM-oriented CIGAR.
 - Exact solve, structure/score/optimal verification, tie-aware comparison, and

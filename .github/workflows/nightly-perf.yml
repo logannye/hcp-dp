@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
       - name: Run benches with baseline comparison
         env:
           RUN_BENCH: "1"

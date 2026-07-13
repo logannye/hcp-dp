@@ -26,8 +26,30 @@ be the fastest alignment implementation.
 
 ## Install
 
+The alpha is distributed as platform wheels, a crates.io package, and signed
+GitHub release archives. Pin the prerelease version explicitly.
+
+Python wheels bundle the matching `hcp-align` executable:
+
 ```bash
-cargo install --git https://github.com/logannye/hcp-dp --bin hcp-align
+python -m pip install 'hcp-align==0.2.0a2'
+```
+
+Install the Rust binary from crates.io:
+
+```bash
+cargo install hcp-dp --version '=0.2.0-alpha.2' --locked
+```
+
+Download a platform archive from the
+[v0.2.0-alpha.2 GitHub release](https://github.com/logannye/hcp-dp/releases/tag/v0.2.0-alpha.2),
+verify it against `SHA256SUMS`, extract it, and run `hcp-align --version`.
+
+To build the exact signed source tag instead:
+
+```bash
+cargo install --git https://github.com/logannye/hcp-dp \
+  --tag v0.2.0-alpha.2 --locked --bin hcp-align
 ```
 
 The v0.2 series is a breaking pre-1.0 reset; see the migration guide before

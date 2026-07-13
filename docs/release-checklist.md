@@ -21,6 +21,10 @@
   distinct schemas.
 - Every adapter conversion is independently verified; discrepancies are either
   fixed or have a versioned signature, reason, and issue URL in the allowlist.
+- The release tag is annotated, cryptographically verified by GitHub, and
+  targets the exact checked-out release commit.
+- A pushed release tag is immutable. Transient jobs may be rerun, but any code
+  or artifact correction requires a new version and tag.
 
 ## `0.2.0-alpha.2`
 
@@ -32,6 +36,8 @@
 - Create a clean signed tag, run the tag workflow, then manually perform the
   first crates.io publication from that exact tag.
 - Configure crates.io trusted publishing only after the first crate exists.
+- Verify clean installations from the public GitHub, PyPI, and crates.io
+  surfaces after publication; workflow-local artifacts are insufficient.
 
 ## `0.2.0-rc.1` and `0.2.0`
 

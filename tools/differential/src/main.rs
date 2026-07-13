@@ -230,7 +230,7 @@ impl Backend for InternalBackend {
         BackendMetadata {
             specification: format!("internal:{}", self.policy),
             name: "hcp-align".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: hcp_dp::VERSION.to_string(),
         }
     }
 
@@ -1208,6 +1208,16 @@ fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_metadata_uses_the_oracle_version() {
+        let backend = InternalBackend {
+            policy: "auto".to_string(),
+        };
+        let metadata = backend.metadata();
+        assert_eq!(metadata.name, "hcp-align");
+        assert_eq!(metadata.version, hcp_dp::VERSION);
+    }
 
     fn input(mode: AlignmentMode, query: &str, target: &str) -> DifferentialInput {
         DifferentialInput {

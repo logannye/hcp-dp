@@ -81,6 +81,7 @@ cargo_with_features build --workspace --all-targets ${RELEASE_FLAG:-}
 
 say "Tests"
 cargo_with_features test --workspace --all-targets --quiet ${RELEASE_FLAG:-}
+python3 -m unittest discover -s scripts/tests -v
 
 say "Solve, verify, and compare smoke workflow"
 cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- \

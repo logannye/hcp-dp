@@ -8,6 +8,9 @@
 //! The original height-compressed DP engine is available only through the
 //! opt-in `experimental-hcp` feature and carries no v0.2 stability guarantee.
 
+/// Version of the `hcp-align` oracle implementation in this crate.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod alignment;
 pub mod batch;
 #[allow(dead_code)]

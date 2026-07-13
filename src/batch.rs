@@ -70,7 +70,7 @@ impl ErrorRecord {
             record_type: "error".to_string(),
             producer: Box::new(Producer {
                 name: "hcp-align".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
+                version: crate::VERSION.to_string(),
                 commit: option_env!("HCP_DP_GIT_COMMIT").map(str::to_string),
                 backend: "batch".to_string(),
             }),
@@ -323,6 +323,18 @@ where
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn error_records_use_the_oracle_version() {
+        let error = ErrorRecord::new(
+            ErrorStage::RecordParse,
+            "invalid_record",
+            "fixture",
+            ErrorContext::default(),
+        );
+        assert_eq!(error.producer.name, "hcp-align");
+        assert_eq!(error.producer.version, crate::VERSION);
+    }
 
     #[test]
     fn slow_first_job_is_ordered_and_window_bounded() {

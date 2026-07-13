@@ -1,7 +1,7 @@
 name: Invalid alignment record
 description: Report a JSON, PAF, or SAM record that hcp-align accepts or rejects incorrectly.
 title: "[Record]: "
-labels: ["bug", "verification"]
+labels: ["bug", "invalid-record"]
 body:
   - type: dropdown
     id: format

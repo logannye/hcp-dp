@@ -79,7 +79,10 @@ jobs:
           rm -f bindings/python/src/hcp_align/bin/hcp-align bindings/python/src/hcp_align/bin/hcp-align.exe
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$stage/${{ matrix.binary }}"
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "bindings/python/src/hcp_align/bin/${{ matrix.binary }}"
-          cp README.md CHANGELOG.md LICENSE schemas/hcp-align.v2.schema.json schemas/hcp-align.differential.v1.schema.json docs/migration-v2.md "$stage/"
+          cp README.md CHANGELOG.md LICENSE schemas/hcp-align.v2.schema.json \
+            schemas/hcp-align.differential.v1.schema.json \
+            schemas/hcp-align.external-validation.v1.schema.json \
+            docs/migration-v2.md "$stage/"
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0
         with:

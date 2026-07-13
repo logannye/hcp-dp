@@ -54,7 +54,9 @@ def main() -> int:
         "benchmarks": measurements,
     }
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    (OUTPUT / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (OUTPUT / "performance-report.json").write_text(
+        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    )
 
     lines = [
         "# hcp-align performance report",
@@ -72,8 +74,10 @@ def main() -> int:
             f"| `{measurement['benchmark']}` | {measurement['median_ns'] / 1_000_000:.3f} ms | "
             f"{low / 1_000_000:.3f}–{high / 1_000_000:.3f} ms |"
         )
-    (OUTPUT / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(OUTPUT / "report.md")
+    (OUTPUT / "performance-report.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
+    print(OUTPUT / "performance-report.md")
     return 0
 
 

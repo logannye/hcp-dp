@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require four scheduled RSS and performance successes for v0.2.0."""
+"""Require four scheduled RSS and performance successes for RC/stable tags."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY"))
     parser.add_argument("--token", default=os.environ.get("GITHUB_TOKEN"))
     args = parser.parse_args()
-    if args.tag != "v0.2.0":
+    if args.tag not in {"v0.2.0-rc.1", "v0.2.0"}:
         print(f"scheduled performance history gate does not apply to {args.tag}")
         return 0
     if not args.repository or not args.token:
@@ -36,7 +36,7 @@ def main() -> int:
             runs = json.load(response).get("workflow_runs", [])
         if len(runs) < 4:
             raise SystemExit(
-                f"v0.2.0 requires four scheduled {workflow} runs; found {len(runs)}"
+                f"{args.tag} requires four scheduled {workflow} runs; found {len(runs)}"
             )
         failures = [run for run in runs if run.get("conclusion") != "success"]
         if failures:

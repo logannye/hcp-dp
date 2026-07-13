@@ -34,7 +34,7 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
 fn version_reports_v02() {
     let output = run(&["--version"]);
     assert!(output.status.success());
-    assert!(stdout(&output).contains("0.2.0-alpha.2"));
+    assert!(stdout(&output).contains(hcp_dp::VERSION));
 }
 
 #[test]

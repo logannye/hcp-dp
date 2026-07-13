@@ -88,3 +88,16 @@ jobs:
         env:
           PYTHONPATH: bindings/python/src
         run: python -m unittest discover -s bindings/python/tests -v
+
+  python-client-windows:
+    name: Python Client Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Test bounded diagnostics and process cleanup
+        env:
+          PYTHONPATH: bindings/python/src
+        run: python -m unittest discover -s bindings/python/tests -v

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/logannye/hcp-dp/schemas/hcp-align.external-validation.v1.schema.json",
+  "title": "hcp-align external validation report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "commit",
+    "policy",
+    "validators",
+    "results"
+  ],
+  "properties": {
+    "schema_version": { "const": "hcp-align.external-validation.v1" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "commit": { "type": "string", "minLength": 1 },
+    "policy": { "type": "string", "minLength": 1 },
+    "validators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edlib", "parasail"],
+      "properties": {
+        "edlib": { "type": "string", "minLength": 1 },
+        "parasail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "mode",
+          "case",
+          "status",
+          "hcp",
+          "external",
+          "detail"
+        ],
+        "properties": {
+          "tool": { "type": "string", "minLength": 1 },
+          "mode": { "type": "string", "minLength": 1 },
+          "case": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed", "skipped"] },
+          "hcp": {
+            "oneOf": [
+              { "type": "integer" },
+              { "const": null }
+            ]
+          },
+          "external": {
+            "oneOf": [
+              { "type": "integer" },
+              { "const": null }
+            ]
+          },
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  }
+}

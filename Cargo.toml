@@ -1,6 +1,6 @@
 [package]
 name = "hcp-dp"
-version = "0.2.0-alpha.2"
+version = "0.2.0-rc.1"
 edition = "2021"
 autobins = false
 autoexamples = false
@@ -25,8 +25,11 @@ include = [
   "LICENSE",
   "schemas/hcp-align.v2.schema.json",
   "schemas/hcp-align.differential.v1.schema.json",
+  "schemas/hcp-align.external-validation.v1.schema.json",
   "docs/migration-v2.md",
   "docs/design.md",
+  "docs/rust-api.md",
+  "docs/pilot-guide.md",
 ]
 
 [lib]

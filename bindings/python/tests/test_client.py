@@ -117,7 +117,7 @@ class ClientTests(unittest.TestCase):
                         )
                     )
             self.assertEqual(raised.exception.returncode, 9)
-            self.assertEqual(raised.exception.stderr, "specific failure\n")
+            self.assertEqual(raised.exception.stderr.splitlines(), ["specific failure"])
 
     def test_early_generator_close_terminates_process(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

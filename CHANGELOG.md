@@ -7,6 +7,22 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
+## 0.2.0-alpha.2 - 2026-07-13
+
+- Added bounded, deterministic batch execution with job-count and active-base
+  backpressure, worker-panic isolation, and ordered streaming output.
+- Replaced whole-file FASTA/FASTQ parsing with wrapped/multiline incremental
+  readers and multi-member gzip support.
+- Added a 16 MiB transient disk-backed sequence store for arbitrary-ID verify
+  and compare workflows, plus disk-backed SAM spooling.
+- Added structured recoverable v2 error records, JSONL continuation, sidecar
+  errors for other formats, and explicit exit-code precedence.
+- Added the 100,000-pair solve/verify bounded-RSS gate and scheduled workflow.
+- Added isolated Rust-Bio 4.0.1 and pinned WFA2 2.3.6 adapters, a versioned
+  differential artifact, and deterministic disagreement reduction.
+- Added platform-wheel Python packaging with generator-style solve, verify,
+  and compare APIs and strict binary/package version matching.
+
 ## 0.2.0-alpha.1 - 2026-07-12
 
 - Reframed `hcp-align` as an exact alignment reference generator, verifier, and

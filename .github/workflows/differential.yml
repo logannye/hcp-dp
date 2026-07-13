@@ -1,0 +1,47 @@
+name: Differential adapters
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/differential/**"
+      - "scripts/build-wfa2-adapter.sh"
+      - "src/oracle.rs"
+      - "src/problems/**"
+      - ".github/workflows/differential.yml"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  adapters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - name: Test Rust-Bio adapter and reducer contracts
+        run: cargo test --locked --manifest-path tools/differential/Cargo.toml
+      - name: Check out pinned WFA2-lib
+        run: |
+          git clone --filter=blob:none https://github.com/smarco/WFA2-lib.git "$RUNNER_TEMP/WFA2-lib"
+          git -C "$RUNNER_TEMP/WFA2-lib" checkout bcf473a6561fa297934a80eaa7c04b4ee412360c
+          test "$(git -C "$RUNNER_TEMP/WFA2-lib" rev-parse HEAD)" = bcf473a6561fa297934a80eaa7c04b4ee412360c
+      - name: Build pinned WFA2 adapter
+        run: scripts/build-wfa2-adapter.sh "$RUNNER_TEMP/WFA2-lib" target/wfa2-adapter
+      - name: Run independently verified WFA2 contract fixture
+        run: |
+          cargo run --locked --manifest-path tools/differential/Cargo.toml -- contract \
+            --left internal:auto --right "wfa2:$PWD/target/wfa2-adapter" \
+            --max-length 3 \
+            --output differential-report.json
+          python scripts/check_differential_allowlist.py --report differential-report.json
+          python scripts/validate_schema.py schemas/hcp-align.differential.v1.schema.json differential-report.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: differential-report
+          path: differential-report.json

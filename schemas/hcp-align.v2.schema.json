@@ -281,11 +281,34 @@
     },
     "error_record": {
       "type": "object",
-      "required": ["schema_version", "record_type", "error"],
+      "required": ["schema_version", "record_type", "producer", "context", "error"],
       "properties": {
         "schema_version": { "const": "hcp-align.v2" },
         "record_type": { "const": "error" },
-        "error": { "type": "string" }
+        "producer": { "$ref": "#/$defs/producer" },
+        "context": {
+          "type": "object",
+          "properties": {
+            "pair_index": { "type": "integer", "minimum": 0 },
+            "query_id": { "type": "string" },
+            "target_id": { "type": "string" },
+            "source_line": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "object",
+          "required": ["stage", "code", "message", "recoverable"],
+          "properties": {
+            "stage": {
+              "enum": ["input_parse", "record_parse", "resolve", "solve", "verify", "compare", "serialize", "worker"]
+            },
+            "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "message": { "type": "string" },
+            "recoverable": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

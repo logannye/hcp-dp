@@ -1,0 +1,16 @@
+{
+  "query": "ACG",
+  "target": "AG",
+  "problem": {
+    "mode": "global-linear",
+    "scoring": {
+      "kind": "linear",
+      "substitution": {
+        "kind": "match-mismatch",
+        "match_score": 2,
+        "mismatch_penalty": 1
+      },
+      "gap": -2
+    }
+  }
+}

@@ -1,0 +1,39 @@
+name: Bounded RSS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * 1"
+  pull_request:
+    paths:
+      - "src/batch.rs"
+      - "src/sequence_io.rs"
+      - "src/sequence_store.rs"
+      - "src/record_io.rs"
+      - "src/bin/hcp_align.rs"
+      - "scripts/rss_gate.py"
+      - "perf/rss-baseline.json"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-rss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - name: Build release binary
+        run: cargo build --release --locked --bin hcp-align
+      - name: Run 100,000-pair bounded-RSS gate
+        run: python3 scripts/rss_gate.py --output rss-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rss-report
+          path: rss-report.json

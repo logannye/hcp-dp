@@ -1587,52 +1587,65 @@ pub fn records_to_sam(
         output.push_str(&format!("@SQ\tSN:{id}\tLN:{len}\n"));
     }
     for record in records {
-        let trace = record
-            .alignment
-            .trace
-            .as_ref()
-            .ok_or_else(|| "SAM requires a traceback".to_string())?;
-        let mut cigar = String::new();
-        if trace.query_span.start > 0 {
-            cigar.push_str(&format!("{}S", trace.query_span.start));
-        }
-        cigar.push_str(&trace.cigar.to_string());
-        let suffix = record
-            .pair
-            .query
-            .length
-            .saturating_sub(trace.query_span.end);
-        if suffix > 0 {
-            cigar.push_str(&format!("{suffix}S"));
-        }
-        if cigar.is_empty() {
-            cigar.push('*');
-        }
         let query = queries
             .get(&record.pair.query.id)
             .ok_or_else(|| format!("missing query sequence '{}'", record.pair.query.id))?;
-        let sequence = String::from_utf8_lossy(query);
-        output.push_str(&format!(
-            "{}\t0\t{}\t{}\t255\t{}\t*\t0\t0\t{}\t*",
-            record.pair.query.id,
-            record.pair.target.id,
-            trace.target_span.start + 1,
-            cigar,
-            sequence,
-        ));
-        if record.alignment.objective.kind == ObjectiveKind::Score {
-            output.push_str(&format!("\tAS:i:{}", record.alignment.objective.value));
-        }
-        let nm: usize = trace
-            .cigar
-            .runs()
-            .iter()
-            .filter(|run| run.op != CigarOp::Match)
-            .map(|run| run.len)
-            .sum();
-        output.push_str(&format!("\tNM:i:{nm}"));
-        output.push('\n');
+        output.push_str(&record_to_sam(record, query)?);
     }
+    Ok(output)
+}
+
+/// Serialize one SAM body record without headers.
+pub fn record_to_sam(record: &AlignmentRecord, query: &[u8]) -> Result<String, String> {
+    let trace = record
+        .alignment
+        .trace
+        .as_ref()
+        .ok_or_else(|| "SAM requires a traceback".to_string())?;
+    if query.len() != record.pair.query.length {
+        return Err(format!(
+            "query sequence '{}' has length {} but record declares {}",
+            record.pair.query.id,
+            query.len(),
+            record.pair.query.length
+        ));
+    }
+    let mut cigar = String::new();
+    if trace.query_span.start > 0 {
+        cigar.push_str(&format!("{}S", trace.query_span.start));
+    }
+    cigar.push_str(&trace.cigar.to_string());
+    let suffix = record
+        .pair
+        .query
+        .length
+        .saturating_sub(trace.query_span.end);
+    if suffix > 0 {
+        cigar.push_str(&format!("{suffix}S"));
+    }
+    if cigar.is_empty() {
+        cigar.push('*');
+    }
+    let sequence = String::from_utf8_lossy(query);
+    let mut output = format!(
+        "{}\t0\t{}\t{}\t255\t{}\t*\t0\t0\t{}\t*",
+        record.pair.query.id,
+        record.pair.target.id,
+        trace.target_span.start + 1,
+        cigar,
+        sequence,
+    );
+    if record.alignment.objective.kind == ObjectiveKind::Score {
+        output.push_str(&format!("\tAS:i:{}", record.alignment.objective.value));
+    }
+    let nm: usize = trace
+        .cigar
+        .runs()
+        .iter()
+        .filter(|run| run.op != CigarOp::Match)
+        .map(|run| run.len)
+        .sum();
+    output.push_str(&format!("\tNM:i:{nm}\n"));
     Ok(output)
 }
 

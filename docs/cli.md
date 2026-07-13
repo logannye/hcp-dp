@@ -20,6 +20,15 @@ Important options:
 - `--integrity`
 - `--format text|json|jsonl|paf|sam`
 
+Common batch options on `solve`, `verify`, and `compare`:
+
+- `--threads N` (default `min(available CPUs, 8)`)
+- `--max-in-flight N` (default `2 × threads`)
+- `--max-in-flight-bases N` (default `64,000,000`)
+- `--fail-fast`
+- `--errors PATH` (JSONL sidecar; conflicts with `--fail-fast`)
+- `--temp-dir PATH`
+
 Affine scoring applies `gap_open + gap_extend` to the first gap position and
 `gap_extend` to each continuation.
 
@@ -36,6 +45,11 @@ scoring flags. JSON v2 records embed their problem definitions.
 Imported records resolve query and target sequences by ID. Duplicate or missing
 IDs are errors. PAF/SAM reverse-strand records are rejected in v0.2 rather than
 being silently mis-normalized.
+
+JSON and JSONL are framed incrementally. JSONL, PAF, and SAM have recoverable
+line boundaries; JSON-array syntax corruption is fatal. JSONL continues after
+record failures by default and emits ordered v2 error records inline. Other
+output formats require `--errors` to continue.
 
 ## `compare`
 
@@ -58,5 +72,7 @@ FASTA/FASTQ files.
 |---:|---|
 | 0 | Requested assurance passed for every record. |
 | 1 | Invalid, incorrectly scored, or non-optimal record. |
-| 2 | Usage, parsing, source-resolution, or configuration error. |
+| 2 | Any error record, or a usage, parsing, source-resolution, or configuration error. |
 | 3 | Inconclusive verification or internal verification error. |
+
+Precedence is `2`, then `1`, then `3`, then `0`.

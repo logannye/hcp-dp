@@ -88,6 +88,15 @@ def validate(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str
     if isinstance(value, list) and "items" in schema:
         for index, child in enumerate(value):
             validate(child, schema["items"], root, f"{path}[{index}]")
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            raise ValidationError(f"{path}: array is shorter than minItems")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise ValidationError(f"{path}: array is longer than maxItems")
+        if schema.get("uniqueItems"):
+            normalized = [json.dumps(item, sort_keys=True) for item in value]
+            if len(normalized) != len(set(normalized)):
+                raise ValidationError(f"{path}: array items are not unique")
 
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
@@ -112,7 +121,11 @@ def main(argv: list[str]) -> int:
         instance_path = Path(name)
         instance = json.loads(instance_path.read_text(encoding="utf-8"))
         try:
-            validate(instance, schema, schema)
+            if isinstance(instance, list) and schema.get("type") != "array":
+                for index, item in enumerate(instance):
+                    validate(item, schema, schema, f"$[{index}]")
+            else:
+                validate(instance, schema, schema)
         except ValidationError as error:
             print(f"{instance_path}: {error}", file=sys.stderr)
             return 1

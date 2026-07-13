@@ -5,6 +5,11 @@ perf/current/
 *.DS_Store
 *.pyc
 __pycache__/
+bindings/python/build/
+bindings/python/dist/
+bindings/python/src/*.egg-info/
+bindings/python/src/hcp_align/bin/hcp-align*
+tools/differential/target/
 .idea/
 .vscode/
 .DS_Store

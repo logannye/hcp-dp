@@ -11,7 +11,7 @@ Version 2 is a tagged record family:
 | `alignment` | `hcp-align solve` or imported external alignment |
 | `verification` | `hcp-align verify` |
 | `comparison` | `hcp-align compare` |
-| `error` | Reserved for recoverable streaming-batch failures. |
+| `error` | Recoverable streaming-batch failure. |
 
 Alignment records contain `producer`, `pair`, `problem`, `alignment`, and
 `verification`; `metrics` and `integrity` are optional. Problem scoring is
@@ -23,9 +23,17 @@ disagreement artifact is portable. Their nested alignment records omit timing,
 expanded operations, and integrity fields to keep the artifact compact; backend
 producer metadata, scoring, objectives, spans, and CIGAR remain present.
 
-`error` is part of the v2 family so streaming producers can preserve ordering,
-but `0.2.0-alpha.1` still treats parse and source-resolution failures as command
-errors with exit code 2 rather than emitting recoverable error records.
+Error records contain producer metadata, optional pair/ID/line context, and a
+stable `stage`, `code`, `message`, and `recoverable` flag. Stages are
+`input_parse`, `record_parse`, `resolve`, `solve`, `verify`, `compare`,
+`serialize`, and `worker`. JSONL emits recoverable errors in input order;
+non-JSONL formats require an error sidecar to continue.
+
+The development-only disagreement/reduction contract has a distinct schema,
+[`schemas/hcp-align.differential.v1.schema.json`](../schemas/hcp-align.differential.v1.schema.json).
+It includes backend versions, the preserved category set, and a deterministic
+SHA-256 fingerprint over the exact normalized disagreement. It must not be
+confused with stable oracle records.
 
 Status is one of `verified`, `invalid`, `inconclusive`, or `error`. Assurance is
 one of `structure`, `score`, or `optimal`. Consumers must inspect both instead

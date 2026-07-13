@@ -1,0 +1,8 @@
+{
+  "schema_version": "hcp-align.rss-baseline.v1",
+  "platform": "ubuntu-latest-x86_64",
+  "scenario": "solve-edit-distance-score-100000x64-threads4-window8",
+  "solve_100000_peak_rss_kib": 65536,
+  "absolute_peak_rss_kib": 131072,
+  "regression_tolerance_percent": 15
+}

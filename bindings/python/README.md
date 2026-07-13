@@ -1,15 +1,21 @@
-# Python subprocess client
+# Python package
 
-This client targets `hcp-align.v2` and resolves the executable from an explicit
-constructor argument, `HCP_ALIGN_BIN`, or `PATH`.
+`hcp-align` is a streaming subprocess client for the v0.2 JSONL contract.
+Platform wheels bundle the exactly matching Rust binary; source-tree users may
+also provide an explicit path. Resolution order is constructor path, bundled
+binary, `HCP_ALIGN_BIN`, then `PATH`, with a strict version check.
 
 ```python
-from hcp_align import HcpAlign
+from hcp_align import Client
 
-client = HcpAlign()
-record = client.solve_edit_distance("kitten", "sitting")
-print(record["alignment"]["objective"]["value"])
+client = Client()
+for record in client.solve_batch(
+    "edit-distance",
+    query_file="queries.fa.gz",
+    target_file="targets.fa.gz",
+):
+    print(record["record_type"])
 ```
 
-`verify_json` returns structured invalid and inconclusive reports for exit codes
-1 and 3; command/configuration exit code 2 raises `HcpAlignError`.
+`solve_batch`, `verify_batch`, and `compare_batch` are generators: records are
+decoded as the binary emits JSONL and are not accumulated by the client.

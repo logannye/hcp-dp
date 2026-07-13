@@ -70,6 +70,9 @@ rustc --version
 say "Formatting"
 cargo fmt --all -- --check
 
+say "Public Rust API boundary"
+python3 scripts/check_public_api.py
+
 say "Clippy"
 cargo_with_features clippy --workspace --all-targets ${VERBOSE:+-v} -- -D warnings
 

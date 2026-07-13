@@ -1,7 +1,7 @@
 name: Backend disagreement
 description: Report a score, validity, coordinate, or traceback disagreement between alignment engines.
 title: "[Disagreement]: "
-labels: ["bug", "differential"]
+labels: ["bug", "backend-disagreement"]
 body:
   - type: markdown
     attributes:

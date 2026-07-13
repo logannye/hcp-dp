@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hcp-align"
-version = "0.2.0a2"
+version = "0.2.0rc1"
 description = "Streaming Python client for the hcp-align exact alignment oracle"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -72,16 +72,6 @@ impl SubstitutionScoring {
             }
         }
     }
-
-    pub fn label(&self) -> String {
-        match self {
-            Self::MatchMismatch {
-                match_score,
-                mismatch_penalty,
-            } => format!("match={match_score};mismatch_penalty={mismatch_penalty}"),
-            Self::Matrix(matrix) => matrix.name().to_string(),
-        }
-    }
 }
 
 /// Unsupported symbol found while validating a sequence against a matrix.

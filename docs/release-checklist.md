@@ -8,6 +8,8 @@
   accept only `v0.2.*` tags.
 - PyPI has a pending trusted publisher for `hcp-align` bound to
   `logannye/hcp-dp`, `release.yml`, and the `pypi` environment.
+- crates.io trusted publishing is bound to `logannye/hcp-dp`, `release.yml`,
+  and the `release` environment after the manual bootstrap publication.
 
 ## Every candidate
 
@@ -27,6 +29,10 @@
   or artifact correction requires a new version and tag.
 
 ## `0.2.0-alpha.2`
+
+Completed on 2026-07-13. The immutable signed tag, GitHub prerelease, PyPI
+wheels, crates.io crate, docs.rs build, checksums, Sigstore bundle, and GitHub
+attestations were verified through fresh public installs.
 
 - The Linux 1,000/100,000 solve RSS delta is no more than 16 MiB.
 - Solve and arbitrary-order verify peaks are no more than 128 MiB and no more
@@ -51,3 +57,5 @@
 - Three-user external-adoption evidence is linked before creating `v0.2.0`.
   Record each pilot in `release/adoption.json`; the stable tag workflow refuses
   fewer than three distinct pilots or missing public evidence links.
+- `v0.2.0-rc.1` has been public for at least seven days and no open issue has
+  the `release-blocker` label; the stable tag workflow enforces both conditions.

@@ -7,12 +7,28 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-__version__ = "0.2.0a2"
-_BINARY_VERSION = "0.2.0-alpha.2"
+__version__ = "0.2.0rc1"
+_BINARY_VERSION = "0.2.0-rc.1"
+_MAX_DIAGNOSTIC_BYTES = 1024 * 1024
+_TRUNCATION_MARKER = (
+    f"[stderr truncated to final {_MAX_DIAGNOSTIC_BYTES} bytes]\n"
+)
+
+
+def _read_diagnostics(stream: Any) -> str:
+    """Return bounded UTF-8 diagnostics from a seekable binary stream."""
+
+    stream.flush()
+    size = stream.seek(0, os.SEEK_END)
+    truncated = size > _MAX_DIAGNOSTIC_BYTES
+    stream.seek(max(0, size - _MAX_DIAGNOSTIC_BYTES), os.SEEK_SET)
+    diagnostics = stream.read().decode("utf-8", errors="replace")
+    return (_TRUNCATION_MARKER if truncated else "") + diagnostics
 
 
 class HcpAlignError(RuntimeError):
@@ -45,14 +61,17 @@ class Client:
         )
 
     def _check_version(self) -> str:
-        completed = subprocess.run(
-            [self.executable, "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        with tempfile.TemporaryFile(mode="w+b") as diagnostics:
+            completed = subprocess.run(
+                [self.executable, "--version"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=diagnostics,
+                text=True,
+            )
+            stderr = _read_diagnostics(diagnostics)
         if completed.returncode != 0:
-            raise HcpAlignError(completed.returncode, completed.stderr)
+            raise HcpAlignError(completed.returncode, stderr)
         version = completed.stdout.strip().split()[-1]
         if version != _BINARY_VERSION:
             raise RuntimeError(
@@ -62,29 +81,28 @@ class Client:
         return version
 
     def _jsonl(self, args: Sequence[str]) -> Iterator[dict[str, Any]]:
-        process = subprocess.Popen(
-            [self.executable, *args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        assert process.stdout is not None
-        assert process.stderr is not None
-        try:
-            for line in process.stdout:
-                if line.strip():
-                    yield json.loads(line)
-            stderr = process.stderr.read()
-            returncode = process.wait()
-            if returncode != 0:
-                raise HcpAlignError(returncode, stderr)
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
-            process.stdout.close()
-            process.stderr.close()
+        with tempfile.TemporaryFile(mode="w+b") as diagnostics:
+            process = subprocess.Popen(
+                [self.executable, *args],
+                stdout=subprocess.PIPE,
+                stderr=diagnostics,
+                text=True,
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            try:
+                for line in process.stdout:
+                    if line.strip():
+                        yield json.loads(line)
+                returncode = process.wait()
+                stderr = _read_diagnostics(diagnostics)
+                if returncode != 0:
+                    raise HcpAlignError(returncode, stderr)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                process.stdout.close()
 
     def solve_batch(
         self,

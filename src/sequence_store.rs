@@ -11,7 +11,7 @@ const CACHE_BYTES: usize = 16 * 1024 * 1024;
 const INGEST_BATCH_RECORDS: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SequenceKind {
+pub(crate) enum SequenceKind {
     Query,
     Target,
 }
@@ -33,13 +33,13 @@ impl SequenceKind {
 }
 
 /// A temporary redb database deleted automatically when dropped.
-pub struct SequenceStore {
+pub(crate) struct SequenceStore {
     database: Database,
     _directory: TempDir,
 }
 
 impl SequenceStore {
-    pub fn create(temp_dir: Option<&Path>) -> Result<Self, String> {
+    pub(crate) fn create(temp_dir: Option<&Path>) -> Result<Self, String> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("hcp-align-sequences-");
         let directory = match temp_dir {
@@ -65,7 +65,11 @@ impl SequenceStore {
         })
     }
 
-    pub fn ingest(&self, kind: SequenceKind, mut source: SequenceSource) -> Result<u64, String> {
+    pub(crate) fn ingest(
+        &self,
+        kind: SequenceKind,
+        mut source: SequenceSource,
+    ) -> Result<u64, String> {
         let mut count = 0u64;
         let mut finished = false;
         while !finished {
@@ -107,7 +111,7 @@ impl SequenceStore {
         Ok(count)
     }
 
-    pub fn get(&self, kind: SequenceKind, id: &str) -> Result<Option<Vec<u8>>, String> {
+    pub(crate) fn get(&self, kind: SequenceKind, id: &str) -> Result<Option<Vec<u8>>, String> {
         let transaction = self
             .database
             .begin_read()

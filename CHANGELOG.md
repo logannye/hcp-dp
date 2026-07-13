@@ -7,6 +7,20 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
+Target: `0.2.0-rc.1` after four consecutive scheduled RSS and Criterion runs.
+
+- Made the transient redb sequence index, SAM spool, worker scheduler, and CLI
+  implementation crate-private; documented and continuously audit the
+  supported crate-root Rust API.
+- Replaced Python stderr pipes with temporary-file diagnostics capped to the
+  final 1 MiB, including large-output, failure, early-close, and cleanup tests.
+- Added enforced release Criterion reports in JSON and Markdown and pinned
+  Edlib 1.3.9.post1/Parasail 1.3.4 validation evidence.
+- Added a pilot guide, evidence issue template, approval-gated outreach drafts,
+  and explicit labels for record and backend-disagreement reports.
+- Added release guards requiring four scheduled RSS/performance successes for
+  the RC and seven days without an open release blocker before stable v0.2.0.
+
 ## 0.2.0-alpha.2 - 2026-07-13
 
 - Added bounded, deterministic batch execution with job-count and active-base
@@ -22,6 +36,9 @@ the alpha release when they improve correctness or clarity.
   differential artifact, and deterministic disagreement reduction.
 - Added platform-wheel Python packaging with generator-style solve, verify,
   and compare APIs and strict binary/package version matching.
+- Published signed archives and attestations on GitHub, five OIDC-published
+  platform wheels on PyPI, and the first `hcp-dp` crate on crates.io; then
+  configured crates.io trusted publishing for later releases.
 
 ## 0.2.0-alpha.1 - 2026-07-12 (unpublished)
 

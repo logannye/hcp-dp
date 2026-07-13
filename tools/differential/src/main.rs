@@ -1,7 +1,7 @@
 use bio::alignment::pairwise::Aligner;
 use bio::alignment::AlignmentOperation;
 use clap::{Parser, Subcommand, ValueEnum};
-use hcp_dp::oracle::{
+use hcp_dp::{
     compare, solve, AlignmentMode, AlignmentRecord, AlignmentResult, AlignmentSpan, CheckResult,
     Cigar, CigarOp, CigarRun, ComparisonReport, Metrics, Objective, ObjectiveKind, PairIdentity,
     ProblemSpec, Producer, ScoringScheme, SequenceIdentity, SolveOptions, SolveRequest,

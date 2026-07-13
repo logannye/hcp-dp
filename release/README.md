@@ -16,3 +16,7 @@ real records. Before creating `v0.2.0`, add at least three distinct entries:
 `job` is either `validated_records` or `reproduced_alignment_bug`. The tag
 workflow validates this evidence and refuses the stable release until three
 distinct pilots have public HTTPS evidence.
+
+Use [`docs/pilot-guide.md`](../docs/pilot-guide.md) for the execution and
+privacy contract. The prepared outreach shortlist and drafts live in
+`pilot-outreach.md`; no message may be sent without explicit owner approval.

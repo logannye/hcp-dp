@@ -15,7 +15,7 @@ use tempfile::TempDir;
 const SAM_REFERENCES: TableDefinition<&str, u64> = TableDefinition::new("sam_references");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AlignmentInputFormat {
+pub(crate) enum AlignmentInputFormat {
     Json,
     Jsonl,
     Paf,
@@ -23,14 +23,14 @@ pub enum AlignmentInputFormat {
 }
 
 #[derive(Clone, Debug)]
-pub struct ResolvedAlignment {
+pub(crate) struct ResolvedAlignment {
     pub record: AlignmentRecord,
     pub query: Vec<u8>,
     pub target: Vec<u8>,
 }
 
 /// Incrementally parse alignment records and resolve their source sequences.
-pub struct AlignmentRecordReader<'a> {
+pub(crate) struct AlignmentRecordReader<'a> {
     reader: Box<dyn BufRead + Send>,
     format: AlignmentInputFormat,
     problem: Option<&'a ProblemSpec>,
@@ -44,7 +44,7 @@ pub struct AlignmentRecordReader<'a> {
 }
 
 impl<'a> AlignmentRecordReader<'a> {
-    pub fn open(
+    pub(crate) fn open(
         path: &Path,
         format: AlignmentInputFormat,
         problem: Option<&'a ProblemSpec>,
@@ -499,14 +499,14 @@ impl Iterator for AlignmentRecordReader<'_> {
 }
 
 /// Disk-backed SAM body and reference-header spool.
-pub struct SamSpool {
+pub(crate) struct SamSpool {
     references: Database,
     body: File,
     _directory: TempDir,
 }
 
 impl SamSpool {
-    pub fn create(temp_dir: Option<&Path>) -> Result<Self, String> {
+    pub(crate) fn create(temp_dir: Option<&Path>) -> Result<Self, String> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("hcp-align-sam-");
         let directory = match temp_dir {
@@ -533,7 +533,7 @@ impl SamSpool {
         })
     }
 
-    pub fn push(&mut self, record: &AlignmentRecord, query: &[u8]) -> Result<(), String> {
+    pub(crate) fn push(&mut self, record: &AlignmentRecord, query: &[u8]) -> Result<(), String> {
         let transaction = self
             .references
             .begin_write()
@@ -570,7 +570,7 @@ impl SamSpool {
             .map_err(|err| format!("failed to write SAM body spool: {err}"))
     }
 
-    pub fn finish(mut self, output: &mut dyn Write) -> Result<(), String> {
+    pub(crate) fn finish(mut self, output: &mut dyn Write) -> Result<(), String> {
         output
             .write_all(b"@HD\tVN:1.6\tSO:unknown\n")
             .map_err(|err| format!("failed to write SAM header: {err}"))?;

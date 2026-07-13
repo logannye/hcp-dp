@@ -26,8 +26,9 @@ be the fastest alignment implementation.
 
 ## Install
 
-The alpha is distributed as platform wheels, a crates.io package, and signed
-GitHub release archives. Pin the prerelease version explicitly.
+The latest published alpha is distributed as platform wheels, a crates.io
+package, and signed GitHub release archives. Pin it explicitly. The `main`
+branch now identifies itself as the unreleased `0.2.0-rc.1` candidate.
 
 Python wheels bundle the matching `hcp-align` executable:
 
@@ -54,6 +55,14 @@ cargo install --git https://github.com/logannye/hcp-dp \
 
 The v0.2 series is a breaking pre-1.0 reset; see the migration guide before
 upgrading an existing CLI, JSON, or Rust integration.
+
+Rust integrations should use the documented crate-root API. Storage,
+scheduling, spooling, and CLI implementation types are deliberately private;
+see [`docs/rust-api.md`](docs/rust-api.md) for the supported v0.2 surface.
+
+Maintainers and pipeline engineers can use the concise
+[`docs/pilot-guide.md`](docs/pilot-guide.md) to validate a real corpus or report
+a sanitized backend disagreement as stable-release evidence.
 
 ## Generate an exact reference
 

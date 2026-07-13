@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use hcp_dp::oracle::{
+use hcp_dp::{
     records_from_json, solve, verify, AlignmentMode, ProblemSpec, ScoringScheme, SolveOptions,
     SolveRequest, VerificationLevel, VerificationRequest, DEFAULT_MAX_CELLS,
 };

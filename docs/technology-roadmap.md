@@ -16,7 +16,8 @@ publication.
 
 ## `0.2.0-alpha.2`: bounded operation
 
-Status: implementation complete; scheduled evidence gate pending.
+Status: published and publicly install-verified on 2026-07-13. Scheduled
+evidence continues to accumulate for the RC/stable gates.
 
 - Incremental wrapped FASTA and multiline FASTQ parsing over plain or
   multi-member gzip streams.
@@ -34,7 +35,8 @@ Gate: four consecutive scheduled RSS/performance runs must pass before final
 
 ## `0.2.0-rc.1`: differential tooling
 
-Status: implementation complete; corpus triage gate pending.
+Status: implementation and hardening complete; the tag remains blocked until
+four consecutive scheduled RSS and Criterion runs pass.
 
 - Standalone Rust-Bio 4.0.1 adapter for all five modes, including affine gap
   convention translation.
@@ -46,23 +48,26 @@ Status: implementation complete; corpus triage gate pending.
   evaluation, per-call, and wall-clock limits.
 - A checked discrepancy allowlist requiring backend/version/signature/reason
   and an issue URL.
+- Crate-private storage/scheduler/spooling internals, bounded Python diagnostic
+  capture, release Criterion reports, and pinned Edlib/Parasail evidence.
 
 Gate: adapter contract tests pass and every external difference is resolved or
 represented by a reviewed allowlist entry.
 
 ## `0.2.0`: distribution and adoption
 
-Status: automation, PyPI publisher registration, release environments, and
-branch protection are configured; artifact validation, the initial crates.io
-publication, scheduled evidence, and adoption gates remain.
+Status: publishing automation, both trusted publishers, release environments,
+branch protection, alpha artifact validation, and the initial crates.io
+publication are complete. Scheduled history, RC observation, and adoption
+evidence remain.
 
 - Dry-run workflow builds and smoke-tests Linux x86_64/aarch64, macOS
   x86_64/arm64, and Windows x86_64 archives and platform wheels.
 - Tag workflow checks Rust/Python/tag equality, reuses tested artifacts,
   generates SPDX SBOMs and consolidated checksums, keyless-signs the checksum
   manifest, attests artifacts, and publishes GitHub/PyPI releases.
-- The first `0.2.0-alpha.2` crates.io publication remains an intentional manual
-  action from its clean signed tag; later releases use trusted publishing.
+- The first `0.2.0-alpha.2` crates.io publication was completed manually from
+  its clean signed commit; later releases use trusted publishing.
 - The `hcp-align` PyPI pending trusted publisher is registered for
   `logannye/hcp-dp`, `.github/workflows/release.yml`, and the `pypi`
   environment.
@@ -72,8 +77,9 @@ publication, scheduled evidence, and adoption gates remain.
 Gate: protected `release` and `pypi` environments, required branch checks, four
 scheduled performance passes, no untriaged discrepancies, clean install smoke
 tests, and three external users independently validating records or reproducing
-an alignment bug. Automation must not create the final tag before the adoption
-gate is documented.
+an alignment bug. Stable also requires seven days of RC observation without an
+open `release-blocker`. Automation must not create the final tag before the
+adoption gate is documented.
 
 ## Experimental HCP SDK
 

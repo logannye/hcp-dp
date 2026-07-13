@@ -5,17 +5,19 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import json
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "target" / "hcp-dp-report"
-REPORT_PATH = REPORT_DIR / "external-validation.json"
+REPORT_PATH = REPORT_DIR / "external-validation-report.json"
 
 
 @dataclass(frozen=True)
@@ -330,9 +332,41 @@ def validate_edlib(required: bool) -> list[dict[str, Any]]:
     return results
 
 
+def installed_version(package: str) -> str:
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return "unavailable"
+
+
+def git_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unavailable"
+
+
 def write_results(results: list[dict[str, Any]]) -> None:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+    report = {
+        "schema_version": "hcp-align.external-validation.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "commit": git_commit(),
+        "policy": (
+            "External objectives are informational; malformed translations and "
+            "untriaged objective differences fail release validation."
+        ),
+        "validators": {
+            "edlib": installed_version("edlib"),
+            "parasail": installed_version("parasail"),
+        },
+        "results": results,
+    }
+    REPORT_PATH.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:

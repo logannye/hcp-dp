@@ -145,7 +145,7 @@ pub struct BatchSummary {
 
 /// One ordered result from [`run_ordered`].
 #[derive(Clone, Debug)]
-pub enum BatchItem<T> {
+pub(crate) enum BatchItem<T> {
     Record(T),
     Error(ErrorRecord),
 }
@@ -156,7 +156,7 @@ pub enum BatchItem<T> {
 /// slow first job therefore cannot grow the reorder buffer beyond
 /// `max_in_flight`. Jobs larger than the base budget are admitted only when no
 /// other job is pending.
-pub fn run_ordered<I, J, T, Weight, Work, Emit>(
+pub(crate) fn run_ordered<I, J, T, Weight, Work, Emit>(
     input: I,
     options: &BatchOptions,
     weight: Weight,

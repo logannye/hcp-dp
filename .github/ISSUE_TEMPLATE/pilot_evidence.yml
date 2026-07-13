@@ -1,0 +1,57 @@
+name: Pilot evidence
+description: Document an external validation run or reproduced alignment defect.
+title: "[Pilot]: "
+labels: ["pilot", "release-evidence"]
+body:
+  - type: dropdown
+    id: job
+    attributes:
+      label: Pilot job
+      options:
+        - Validated at least 100 real records
+        - Validated an entire smaller real failure corpus
+        - Reproduced an alignment backend defect
+    validations:
+      required: true
+  - type: input
+    id: identity
+    attributes:
+      label: Pilot identity
+      description: Project, organization, or maintainer identity used for release evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Real-world context
+      description: Describe the aligner, library, or pipeline job and why these records matter.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and conventions
+      description: Include hcp-align/backend versions, format, mode, scoring, gap, clipping, and coordinate conventions.
+    validations:
+      required: true
+  - type: textarea
+    id: outcomes
+    attributes:
+      label: Counts and outcome
+      description: Include record count, status counts, and the practical result of the pilot.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Sanitized evidence or reproducer
+      description: Attach a minimized artifact, public fixture, sequence digests, or enough aggregate evidence to audit the result. Never post restricted data.
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Release evidence
+      options:
+        - label: This issue may be linked from `release/adoption.json` as public v0.2 release evidence.
+          required: true

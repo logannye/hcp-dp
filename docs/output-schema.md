@@ -35,6 +35,12 @@ It includes backend versions, the preserved category set, and a deterministic
 SHA-256 fingerprint over the exact normalized disagreement. It must not be
 confused with stable oracle records.
 
+Pinned Edlib/Parasail release evidence has another distinct contract,
+[`schemas/hcp-align.external-validation.v1.schema.json`](../schemas/hcp-align.external-validation.v1.schema.json).
+It records exact validator versions and treats malformed translations or
+untriaged objective differences as release failures while keeping competitor
+results informational.
+
 Status is one of `verified`, `invalid`, `inconclusive`, or `error`. Assurance is
 one of `structure`, `score`, or `optimal`. Consumers must inspect both instead
 of treating a missing boolean as success.

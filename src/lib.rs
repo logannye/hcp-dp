@@ -11,38 +11,48 @@
 /// Version of the `hcp-align` oracle implementation in this crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub mod alignment;
-pub mod batch;
+mod alignment;
+mod batch;
 #[allow(dead_code)]
 mod blocks;
 #[cfg(feature = "experimental-hcp")]
 mod builder;
+mod cli;
 #[cfg(feature = "experimental-hcp")]
 mod contract;
 #[allow(dead_code)]
 mod engine;
-pub mod oracle;
+mod oracle;
 #[allow(dead_code)]
 mod problems;
-pub mod record_io;
-pub mod scoring;
+mod record_io;
+mod scoring;
 pub mod sequence_io;
-pub mod sequence_store;
+mod sequence_store;
 mod traits;
 mod utils;
 
 pub use crate::batch::{
-    BatchOptions, BatchSummary, ErrorContext, ErrorRecord, ErrorStage, OracleRecord,
+    BatchOptions, BatchSummary, ErrorContext, ErrorDetail, ErrorRecord, ErrorStage, OracleRecord,
 };
 pub use crate::oracle::{
     compare, record_to_paf, record_to_sam, records_from_json, records_from_jsonl, records_from_paf,
     records_from_sam, records_to_json, records_to_jsonl, records_to_sam, solve, verify,
-    AlignmentMode, AlignmentRecord, AlignmentSpan, Cigar, CigarOp, ComparisonInputs,
-    ComparisonReport, GapModel, ProblemSpec, ScoringScheme, SolveOptions, SolveRequest, SolveScope,
-    SubstitutionScheme, VerificationLevel, VerificationReport, VerificationRequest,
-    VerificationStatus,
+    verify_integrity, AlignmentMode, AlignmentRecord, AlignmentResult, AlignmentSpan, CheckResult,
+    Cigar, CigarOp, CigarRun, ComparisonInputs, ComparisonReport, GapModel, IntegrityFingerprint,
+    Metrics, Objective, ObjectiveKind, PairIdentity, ProblemSpec, Producer, ScoringScheme,
+    SequenceIdentity, SolveOptions, SolveRequest, SolveScope, SubstitutionScheme, TraceRecord,
+    VerificationLevel, VerificationReport, VerificationRequest, VerificationStatus,
+    VerificationSummary, DEFAULT_MAX_CELLS, SCHEMA_VERSION,
 };
 pub use crate::scoring::SubstitutionMatrix;
+
+/// Internal entry point used by the packaged `hcp-align` binary.
+///
+/// This is not part of the supported Rust API. Library users should call
+/// [`solve`], [`verify`], or [`compare`] directly.
+#[doc(hidden)]
+pub use crate::cli::main as __hcp_align_main;
 
 /// Unstable height-compressed DP implementation APIs.
 ///

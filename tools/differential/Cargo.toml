@@ -1,0 +1,16 @@
+[package]
+name = "hcp-align-differential"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.88"
+
+[dependencies]
+bio = "=4.0.1"
+clap = { version = "4.5", features = ["derive"] }
+hcp-dp = { path = "../.." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[workspace]

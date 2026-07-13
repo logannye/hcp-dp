@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/logannye/hcp-dp/blob/main/schemas/hcp-align.differential.v1.schema.json",
+  "title": "hcp-align differential artifact v1",
+  "type": "object",
+  "required": [
+    "schema_version", "reduction_status", "backends", "original", "minimized",
+    "original_comparison", "minimized_comparison", "signature", "evaluations",
+    "elapsed_ms", "termination_reason"
+  ],
+  "properties": {
+    "schema_version": { "const": "hcp-align.differential.v1" },
+    "reduction_status": { "enum": ["minimized", "inconclusive", "not_applicable"] },
+    "backends": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/backend" }
+    },
+    "original": { "$ref": "#/$defs/input" },
+    "minimized": { "$ref": "#/$defs/input" },
+    "original_comparison": { "type": "object" },
+    "minimized_comparison": { "type": "object" },
+    "signature": {
+      "type": "object",
+      "required": ["categories", "fingerprint_sha256"],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["objective", "left_validity", "right_validity", "coordinates", "operation_count", "tie_breaking"]
+          }
+        },
+        "fingerprint_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "evaluations": { "type": "integer", "minimum": 0 },
+    "elapsed_ms": { "type": "integer", "minimum": 0 },
+    "termination_reason": { "type": "string" }
+  },
+  "$defs": {
+    "backend": {
+      "type": "object",
+      "required": ["specification", "name", "version"],
+      "properties": {
+        "specification": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "input": {
+      "type": "object",
+      "required": ["query", "target", "problem"],
+      "properties": {
+        "query": { "type": "string" },
+        "target": { "type": "string" },
+        "problem": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

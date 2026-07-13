@@ -1,0 +1,131 @@
+name: Artifact dry run
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "bindings/python/**"
+      - "scripts/check_release_versions.py"
+      - ".github/workflows/artifact-dry-run.yml"
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  artifacts:
+    name: ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: hcp-align-linux-x86_64
+            binary: hcp-align
+            wheel_platform: manylinux_2_35_x86_64
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: hcp-align-linux-aarch64
+            binary: hcp-align
+            wheel_platform: manylinux_2_35_aarch64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: hcp-align-macos-x86_64
+            binary: hcp-align
+            wheel_platform: macosx_11_0_x86_64
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            artifact: hcp-align-macos-arm64
+            binary: hcp-align
+            wheel_platform: macosx_11_0_arm64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: hcp-align-windows-x86_64
+            binary: hcp-align.exe
+            wheel_platform: win_amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Build exact release binary
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin hcp-align
+      - name: Run smoke corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          "$binary" --version
+          "$binary" solve edit-distance --query kitten --target sitting --cross-check --format jsonl > smoke.jsonl
+          python -c 'import json; r=json.loads(open("smoke.jsonl").read()); assert r["alignment"]["objective"]["value"] == 3'
+      - name: Stage archive and wheel binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="artifacts/${{ matrix.artifact }}"
+          mkdir -p "$stage" bindings/python/src/hcp_align/bin artifacts/wheels
+          rm -f bindings/python/src/hcp_align/bin/hcp-align bindings/python/src/hcp_align/bin/hcp-align.exe
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$stage/${{ matrix.binary }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "bindings/python/src/hcp_align/bin/${{ matrix.binary }}"
+          cp README.md CHANGELOG.md LICENSE schemas/hcp-align.v2.schema.json schemas/hcp-align.differential.v1.schema.json docs/migration-v2.md "$stage/"
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: artifacts/${{ matrix.artifact }}
+          format: spdx-json
+          output-file: artifacts/${{ matrix.artifact }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Package archive and platform wheel
+        shell: bash
+        env:
+          HCP_WHEEL_PLAT_NAME: ${{ matrix.wheel_platform }}
+        run: |
+          set -euo pipefail
+          tar -C artifacts -czf "artifacts/${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}"
+          python -m pip install --disable-pip-version-check build twine
+          (cd bindings/python && python -m build --wheel --outdir ../../artifacts/wheels)
+          python -m twine check artifacts/wheels/*.whl
+      - name: Install wheel and verify bundled binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv wheel-smoke
+          source wheel-smoke/bin/activate 2>/dev/null || source wheel-smoke/Scripts/activate
+          python -m pip install artifacts/wheels/*.whl
+          python -c 'from hcp_align import Client; print(Client().version)'
+      - name: Attest archive
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/${{ matrix.artifact }}.tar.gz
+      - name: Upload tested artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            artifacts/${{ matrix.artifact }}.tar.gz
+            artifacts/${{ matrix.artifact }}.spdx.json
+            artifacts/wheels/*.whl
+
+  crate:
+    name: Crate publish dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - run: cargo publish --dry-run --locked

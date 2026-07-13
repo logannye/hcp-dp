@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75", "wheel>=0.45"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hcp-align"
+version = "0.2.0a2"
+description = "Streaming Python client for the hcp-align exact alignment oracle"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Logan Nye" }]
+keywords = ["bioinformatics", "alignment", "cigar", "verification"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Homepage = "https://github.com/logannye/hcp-dp"
+Repository = "https://github.com/logannye/hcp-dp"
+Issues = "https://github.com/logannye/hcp-dp/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hcp_align = ["bin/hcp-align", "bin/hcp-align.exe"]

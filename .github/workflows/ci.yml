@@ -48,7 +48,7 @@ jobs:
     name: Feature Checks
     strategy:
       matrix:
-        features: [parallel, tracing, "parallel tracing", experimental-hcp]
+        features: [tracing, experimental-hcp, "tracing experimental-hcp"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -75,3 +75,16 @@ jobs:
         with:
           name: coverage
           path: target/coverage/lcov.info
+
+  python-client:
+    name: Python Client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Test streaming client
+        env:
+          PYTHONPATH: bindings/python/src
+        run: python -m unittest discover -s bindings/python/tests -v

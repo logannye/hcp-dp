@@ -34,7 +34,7 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
 fn version_reports_v02() {
     let output = run(&["--version"]);
     assert!(output.status.success());
-    assert!(stdout(&output).contains("0.2.0-alpha.1"));
+    assert!(stdout(&output).contains("0.2.0-alpha.2"));
 }
 
 #[test]
@@ -663,6 +663,137 @@ fn verification_source_collections_do_not_require_positional_pairing() {
         "json",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn jsonl_continues_with_an_ordered_error_record() {
+    let solved = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "AC",
+        "--target",
+        "AC",
+        "--format",
+        "json",
+    ]);
+    assert!(solved.status.success());
+    let valid = stdout(&solved);
+    let records = temp_file(
+        "recoverable.jsonl",
+        &format!("{}\n{{not-json}}\n{}\n", valid.trim(), valid.trim()),
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        records.to_str().unwrap(),
+        "--format",
+        "jsonl",
+        "--query",
+        "AC",
+        "--target",
+        "AC",
+        "--output-format",
+        "jsonl",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    let lines: Vec<Value> = stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0]["record_type"], "verification");
+    assert_eq!(lines[1]["record_type"], "error");
+    assert_eq!(lines[1]["error"]["stage"], "record_parse");
+    assert_eq!(lines[1]["context"]["pair_index"], 1);
+    assert_eq!(lines[1]["context"]["source_line"], 2);
+    assert_eq!(lines[2]["record_type"], "verification");
+}
+
+#[test]
+fn non_jsonl_sidecar_enables_record_continuation() {
+    let paf = temp_file(
+        "recoverable.paf",
+        concat!(
+            "broken\n",
+            "query\t2\t0\t2\t+\ttarget\t2\t0\t2\t2\t2\t255\tcg:Z:2=\tNM:i:0\n"
+        ),
+    );
+    let errors = temp_file("recoverable-errors.jsonl", "");
+    let output = run(&[
+        "verify",
+        "--alignment",
+        paf.to_str().unwrap(),
+        "--format",
+        "paf",
+        "--query",
+        "AC",
+        "--target",
+        "AC",
+        "--mode",
+        "edit-distance",
+        "--errors",
+        errors.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(stdout(&output).contains("Verified"));
+    let error: Value = serde_json::from_str(&fs::read_to_string(errors).unwrap()).unwrap();
+    assert_eq!(error["error"]["code"], "too_few_fields");
+}
+
+#[test]
+fn unequal_sequence_counts_emit_one_terminal_jsonl_error() {
+    let queries = temp_file("unequal-query.fa", ">q1\nA\n>q2\nC\n");
+    let targets = temp_file("unequal-target.fa", ">t1\nA\n");
+    let output = run(&[
+        "solve",
+        "edit-distance",
+        "--query-file",
+        queries.to_str().unwrap(),
+        "--target-file",
+        targets.to_str().unwrap(),
+        "--format",
+        "jsonl",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let lines: Vec<Value> = stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1]["error"]["code"], "pair_count_mismatch");
+    assert_eq!(lines[1]["error"]["recoverable"], false);
+}
+
+#[test]
+fn solve_recovers_after_a_record_scoped_fastq_error() {
+    let queries = temp_file(
+        "recoverable-query.fastq",
+        "@q0\nAC\n+\n!!!\n@q1\nTG\n+\n##\n",
+    );
+    let targets = temp_file("recoverable-target.fa", ">t0\nAC\n>t1\nTG\n");
+    let output = run(&[
+        "solve",
+        "edit-distance",
+        "--query-file",
+        queries.to_str().unwrap(),
+        "--target-file",
+        targets.to_str().unwrap(),
+        "--format",
+        "jsonl",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    let lines: Vec<Value> = stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["record_type"], "error");
+    assert_eq!(lines[0]["error"]["recoverable"], true);
+    assert_eq!(lines[1]["record_type"], "alignment");
+    assert_eq!(lines[1]["pair"]["index"], 1);
+    assert_eq!(lines[1]["pair"]["query"]["id"], "q1");
+    assert_eq!(lines[1]["pair"]["target"]["id"], "t1");
 }
 
 #[test]

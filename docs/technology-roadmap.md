@@ -1,57 +1,78 @@
 # v0.2 Delivery Roadmap
 
-This roadmap is ordered by end-user evidence. A later milestone does not widen
-the supported product until its gate is met.
+This roadmap distinguishes implemented code from gates requiring scheduled or
+external evidence.
 
-## Alpha 1: trustworthy oracle contract
+## `0.2.0-alpha.1`: trustworthy oracle contract
 
-Status: implemented on the v0.2 development branch.
+Status: released contract implemented.
 
-- Canonical scoring, span, provenance, objective, and SAM-oriented CIGAR types.
-- Exact `solve` for the five supported modes with unconditional path rescoring.
-- Strict JSON v2, PAF, and SAM import/export.
-- Structure, score, and exact-optimal verification with a 25,000,000-cell
-  default refusal budget and explicit `inconclusive` status.
-- Objective-first, tie-aware `compare` with portable compact artifacts.
-- Mutation-specific checks, exhaustive small binary pairs, and a versioned
-  differential corpus covering empty inputs, repeats, homopolymers, skew,
-  long gaps, local resets, free ends, and ambiguous optima.
-- Pure-Rust runtime, gzip sequence input, Python subprocess wrapper, observed
-  solver/verifier/parser baselines, and fixed Criterion registration.
+- Canonical scoring, spans, provenance, objectives, and SAM-oriented CIGAR.
+- Exact solve, structure/score/optimal verification, tie-aware comparison, and
+  strict JSON v2/PAF/SAM boundaries.
+- Independent rolling-frontier optimality checks and explicit work refusal.
 - Generic HCP machinery isolated under `experimental-hcp`.
 
-Release candidate: `0.2.0-alpha.1` after every GitHub workflow passes from the
-same commit.
+## `0.2.0-alpha.2`: bounded operation
 
-## Alpha 2: bounded batch operation
+Status: implementation complete; scheduled evidence gate pending.
 
-Status: next implementation milestone.
+- Incremental wrapped FASTA and multiline FASTQ parsing over plain or
+  multi-member gzip streams.
+- Deterministic bounded worker windows with count and active-base limits.
+- A transient 16 MiB-cache redb store for arbitrary-ID resolution and a
+  disk-backed SAM body/reference spool.
+- Ordered recoverable error records, JSONL continuation, sidecars for other
+  formats, and stable exit precedence.
+- Deterministic 1,000/100,000-pair solve and arbitrary-order verify RSS gates:
+  at most 16 MiB growth, 128 MiB absolute RSS, and 15% over the checked Linux
+  baseline.
 
-- Incremental FASTA/FASTQ decoding rather than whole-file accumulation.
-- Bounded in-flight parallel work with deterministic ordered JSONL output.
-- Recoverable per-record `error` records and continuation after pair failures.
-- Peak-RSS scenarios and checked 15% memory budgets.
-- A 100,000-pair batch gate proving memory is proportional to active pairs, not
-  total record count.
-- Disagreement-preserving corpus reduction for internal and external adapters.
+Gate: four consecutive scheduled RSS/performance runs must pass before final
+`0.2.0`. The generator and fixtures are ephemeral, not stored in Git.
 
-No alpha-1 documentation claims these operational properties.
+## `0.2.0-rc.1`: differential tooling
 
-## 0.2 release: distribution and adoption
+Status: implementation complete; corpus triage gate pending.
 
-Status: requires external systems and users.
+- Standalone Rust-Bio 4.0.1 adapter for all five modes, including affine gap
+  convention translation.
+- Pinned WFA2-lib 2.3.6 adapter for edit, global linear/affine, and semiglobal
+  linear modes, with heuristics disabled and explicit unsupported cases.
+- Exact verification after every adapter conversion and explicit WFA indel
+  orientation normalization.
+- `hcp-align.differential.v1` artifacts and deterministic delta reduction with
+  evaluation, per-call, and wall-clock limits.
+- A checked discrepancy allowlist requiring backend/version/signature/reason
+  and an issue URL.
 
-- Publish the crate and generated API documentation after API review.
-- Build Linux, macOS, and Windows artifacts from one tag with checksums, SBOM,
-  signed provenance, and the v2 schema/migration guide.
-- Package the Python client with batch APIs and deterministic binary resolution.
-- Publish reproducible differential reports for Edlib, WFA2, Parasail, and
-  Rust-Bio where their scoring conventions can be translated exactly.
-- Complete discovery with five aligner/library maintainers and hands-on pilots
-  with at least three; turn permitted failures into regression fixtures.
+Gate: adapter contract tests pass and every external difference is resolved or
+represented by a reviewed allowlist entry.
 
-The release gate is three external users independently verifying real records
-or reproducing a backend bug.
+## `0.2.0`: distribution and adoption
+
+Status: automation, PyPI publisher registration, release environments, and
+branch protection are configured; artifact validation, the initial crates.io
+publication, scheduled evidence, and adoption gates remain.
+
+- Dry-run workflow builds and smoke-tests Linux x86_64/aarch64, macOS
+  x86_64/arm64, and Windows x86_64 archives and platform wheels.
+- Tag workflow checks Rust/Python/tag equality, reuses tested artifacts,
+  generates SPDX SBOMs and consolidated checksums, keyless-signs the checksum
+  manifest, attests artifacts, and publishes GitHub/PyPI releases.
+- The first `0.2.0-alpha.2` crates.io publication remains an intentional manual
+  action from its clean signed tag; later releases use trusted publishing.
+- The `hcp-align` PyPI pending trusted publisher is registered for
+  `logannye/hcp-dp`, `.github/workflows/release.yml`, and the `pypi`
+  environment.
+- Python generators stream solve/verify/compare JSONL and enforce an exact
+  bundled-binary version.
+
+Gate: protected `release` and `pypi` environments, required branch checks, four
+scheduled performance passes, no untriaged discrepancies, clean install smoke
+tests, and three external users independently validating records or reproducing
+an alignment bug. Automation must not create the final tag before the adoption
+gate is documented.
 
 ## Experimental HCP SDK
 
@@ -59,7 +80,6 @@ Status: demand-gated; no promotion work begins before oracle adoption.
 
 Promotion requires a non-replay algebraic summary used during reconstruction,
 a measured benefit, reduced authoring burden, and two external implementers.
-Until then, every HCP authoring API may change without migration support.
 
 ## Admission rule
 

@@ -102,6 +102,28 @@ cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- \
   --query kitten --target sitting --output-format json --output "${TMP_DIR}/comparison.json"
 [[ "$(json_value equivalent < "${TMP_DIR}/comparison.json")" == "true" ]] || fail "comparison failed"
 
+say "Recoverable JSONL error contract"
+{
+  cat "${TMP_DIR}/alignment.json"
+  printf '%s\n' '{"schema_version":"hcp-align.v2","record_type":"broken"}'
+  cat "${TMP_DIR}/alignment.json"
+} > "${TMP_DIR}/records.jsonl"
+set +e
+cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- \
+  verify --alignment "${TMP_DIR}/records.jsonl" --format jsonl \
+  --query kitten --target sitting --output-format jsonl \
+  --output "${TMP_DIR}/recoverable.jsonl"
+status=$?
+set -e
+[[ "${status}" == "2" ]] || fail "recoverable record errors must return exit code 2"
+python3 - "${TMP_DIR}/recoverable.jsonl" "${TMP_DIR}/error.json" <<'PY'
+import json, sys
+records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+errors = [record for record in records if record.get("record_type") == "error"]
+assert len(records) == 3 and len(errors) == 1
+json.dump(errors[0], open(sys.argv[2], "w", encoding="utf-8"))
+PY
+
 say "PAF and SAM round trips"
 for format in paf sam; do
   cargo_with_features run --quiet --bin hcp-align ${RELEASE_FLAG:-} -- \
@@ -115,7 +137,9 @@ for format in paf sam; do
 done
 
 say "JSON v2 schema"
-python3 scripts/validate_schema.py schemas/hcp-align.v2.schema.json "${TMP_DIR}/alignment.json" "${TMP_DIR}/verification.json" "${TMP_DIR}/comparison.json"
+python3 scripts/validate_schema.py schemas/hcp-align.v2.schema.json \
+  "${TMP_DIR}/alignment.json" "${TMP_DIR}/verification.json" \
+  "${TMP_DIR}/comparison.json" "${TMP_DIR}/error.json"
 
 if [[ -n "${RUN_BENCH}" ]]; then
   say "Criterion scenarios and checked baselines"

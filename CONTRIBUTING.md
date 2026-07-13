@@ -17,7 +17,7 @@ Useful focused checks:
 ```bash
 cargo test --lib --tests
 cargo test --features tracing --lib --tests
-cargo test --features parallel --lib --tests
+cargo test --features tracing --lib --tests
 cargo test --features experimental-hcp --lib --tests
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo run --bin hcp-align -- solve edit-distance --query kitten --target sitting --cross-check

@@ -58,6 +58,8 @@ Supported solve modes:
 - `semiglobal-linear`
 
 FASTA and FASTQ sources may be plain text or gzip-compressed (`.gz`).
+Parsing is incremental, including wrapped FASTA, multiline FASTQ, and
+multi-member gzip streams. Quality text is length-checked and discarded.
 
 Use `--scope score` for an objective without traceback. Every traceback is
 rescored independently. `--cross-check` additionally compares the objective
@@ -109,7 +111,8 @@ Exit codes are stable:
 
 - `0`: every record satisfies the requested level;
 - `1`: at least one record is invalid or non-optimal;
-- `2`: command, input, or configuration error;
+- `2`: at least one recoverable record error, or a command/input/configuration
+  error;
 - `3`: at least one record is inconclusive or verification encountered an
   internal error.
 
@@ -126,6 +129,26 @@ hcp-align compare \
 
 Comparison first verifies both records exactly. Equal optimal objectives are
 considered equivalent even when tie-breaking produces different CIGARs.
+
+## Bounded batches and record errors
+
+All commands support `--threads`, `--max-in-flight`, and
+`--max-in-flight-bases`. Defaults are at most eight workers, twice that many
+in-flight records, and 64 million active bases. Output order is deterministic;
+submission cannot advance beyond the bounded window when an early pair is
+slow. A pair larger than the base budget runs alone.
+
+JSONL is the recommended batch format. A malformed JSONL/PAF/SAM line or
+record-scoped sequence failure produces an ordered `record_type: "error"` and
+processing continues. Use `--fail-fast` to stop. JSON, PAF, SAM, and text remain
+fail-fast unless `--errors errors.jsonl` provides a sidecar. Corrupt gzip,
+duplicate source IDs, malformed JSON arrays, and temporary-store failures are
+fatal because later results cannot be trusted.
+
+`verify` and `compare` resolve arbitrary IDs through a temporary disk-backed
+store with a 16 MiB cache (`--temp-dir` selects its parent). Temporary disk may
+scale with source data; resident memory does not. This store is deleted on drop
+and is not a persistent reference index.
 
 ## Canonical semantics
 
@@ -154,7 +177,7 @@ The generic height-compressed DP machinery is intentionally unstable and only
 available with:
 
 ```toml
-hcp-dp = { version = "0.2.0-alpha.1", features = ["experimental-hcp"] }
+hcp-dp = { version = "0.2.0-alpha.2", features = ["experimental-hcp"] }
 ```
 
 It lives under `hcp_dp::experimental::hcp` and carries no v0.2 compatibility
@@ -171,6 +194,22 @@ signature, identity proof, or authenticity guarantee.
 Supported contracts are JSON, JSONL, PAF, SAM, and human-readable text. BAM,
 CRAM, TSV, custom CIGAR tables, read mapping, reference indexing, reverse-strand
 mapping, and mapping-quality estimation are not supported.
+
+## Differential development tooling
+
+The standalone package under `tools/differential` pins Rust-Bio 4.0.1 and
+WFA2-lib 2.3.6 without adding either to the runtime crate. It validates every
+converted path with the oracle, emits `hcp-align.differential.v1` artifacts,
+and deterministically reduces disagreements while preserving their exact
+category set. External engines remain development and release-report tooling.
+
+## Python
+
+Platform wheels use the distribution name `hcp-align` and import name
+`hcp_align`. `solve_batch`, `verify_batch`, and `compare_batch` are generators
+over JSONL. Wheels bundle the matching binary and reject version mismatches;
+resolution order is explicit constructor path, bundled binary,
+`HCP_ALIGN_BIN`, then `PATH`.
 
 ## Development
 

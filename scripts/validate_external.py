@@ -97,8 +97,9 @@ def run_hcp(args: list[str]) -> dict[str, Any]:
         "--bin",
         "hcp-align",
         "--",
+        "solve",
         *args,
-        "--verify",
+        "--cross-check",
         "--format",
         "json",
     ]
@@ -200,7 +201,7 @@ def hcp_linear(case: LinearCase, mode: str) -> int:
             str(case.gap),
         ]
     )
-    return int(payload["score"])
+    return int(payload["alignment"]["objective"]["value"])
 
 
 def hcp_affine(case: AffineCase) -> int:
@@ -221,7 +222,7 @@ def hcp_affine(case: AffineCase) -> int:
             str(case.gap_extend),
         ]
     )
-    return int(payload["score"])
+    return int(payload["alignment"]["objective"]["value"])
 
 
 def validate_parasail(required: bool) -> list[dict[str, Any]]:
@@ -318,7 +319,13 @@ def validate_edlib(required: bool) -> list[dict[str, Any]]:
         hcp = run_hcp(["edit-distance", "--query", case.query, "--target", case.target])
         external_distance = edlib.align(case.query, case.target)["editDistance"]
         results.append(
-            compare("edlib", "edit-distance", case.name, int(hcp["distance"]), int(external_distance))
+            compare(
+                "edlib",
+                "edit-distance",
+                case.name,
+                int(hcp["alignment"]["objective"]["value"]),
+                int(external_distance),
+            )
         )
     return results
 

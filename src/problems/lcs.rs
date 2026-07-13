@@ -301,7 +301,7 @@ pub fn lcs_bit_parallel_len(x: &[u8], y: &[u8]) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HcpEngine;
+    use crate::engine::HcpEngine;
 
     #[test]
     fn audit_regression_path_realizes_cost() {

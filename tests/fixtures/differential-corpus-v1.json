@@ -1,0 +1,19 @@
+{
+  "schema_version": "hcp-align.corpus.v1",
+  "cases": [
+    { "name": "edit-empty-query", "mode": "edit-distance", "query": "", "target": "ACG", "objective": 3 },
+    { "name": "edit-repeats", "mode": "edit-distance", "query": "ATAT", "target": "TATA", "objective": 2 },
+    { "name": "edit-homopolymer", "mode": "edit-distance", "query": "AAAAA", "target": "AA", "objective": 3 },
+    { "name": "edit-skewed", "mode": "edit-distance", "query": "A", "target": "ACGT", "objective": 3 },
+    { "name": "edit-long-indel", "mode": "edit-distance", "query": "ACGTAAAA", "target": "ACGT", "objective": 4 },
+    { "name": "edit-ambiguous-optimum", "mode": "edit-distance", "query": "AA", "target": "A", "objective": 1 },
+    { "name": "global-linear-classic", "mode": "global-linear", "query": "GATTACA", "target": "GCATGCU", "objective": 2 },
+    { "name": "global-linear-empty", "mode": "global-linear", "query": "", "target": "AAA", "objective": -6 },
+    { "name": "affine-split-boundary", "mode": "global-affine", "query": "ACB", "target": "A", "objective": -3 },
+    { "name": "affine-long-gap", "mode": "global-affine", "query": "A", "target": "ACGT", "objective": -4 },
+    { "name": "local-reset", "mode": "local-linear", "query": "TTTACGTAAA", "target": "GGACGTCC", "objective": 8 },
+    { "name": "local-empty-optimum", "mode": "local-linear", "query": "AAA", "target": "TTT", "objective": 0 },
+    { "name": "semiglobal-free-ends", "mode": "semiglobal-linear", "query": "ACGT", "target": "TTACGTTT", "objective": 8 },
+    { "name": "semiglobal-empty-query", "mode": "semiglobal-linear", "query": "", "target": "AAA", "objective": 0 }
+  ]
+}

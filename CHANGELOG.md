@@ -7,6 +7,35 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
+## 0.2.0-alpha.1 - 2026-07-12
+
+- Reframed `hcp-align` as an exact alignment reference generator, verifier, and
+  backend comparison tool.
+- Replaced top-level alignment commands with `solve`, `verify`, and `compare`.
+- Added the nested `hcp-align.v2` record family and explicit verification
+  statuses.
+- Added structure, realized-score, and exact-optimality verification for JSON,
+  PAF, and SAM records with a hard work budget and distinct exit codes.
+- Normalized public CIGAR to SAM-oriented insertion/deletion semantics.
+- Renamed the diagonal affine backend to `banded-affine`.
+- Replaced proof-carrying certificate language with integrity fingerprints.
+- Added stable alignment-domain Rust APIs and moved HCP authoring APIs behind
+  the `experimental-hcp` feature.
+- Added typed PAF/SAM tag checks, portable comparison artifacts, gzip sequence
+  input, a versioned differential corpus, and mutation-specific verification
+  tests.
+- Replaced placeholder performance budgets with observed solver, verifier, and
+  parser baselines and fixed explicit Criterion registration.
+- Removed seeded extension, DTW, layered DAG, Viterbi, TSV, and custom CIGAR
+  output from the supported product surface.
+
+### Breaking changes
+
+- Version 1 CLI, JSON, CIGAR indel orientation, and Rust API consumers must
+  migrate using `docs/migration-v2.md`.
+
+## 0.1.0-alpha.2 - 2026-07-11
+
 - Added `hcp-align --certificate` for opt-in SHA-256 result certificates in
   JSON/JSONL output, covering normalized inputs, scoring parameters, trace
   operations, result fields, and certificate payloads.

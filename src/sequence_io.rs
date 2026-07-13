@@ -1,6 +1,7 @@
 //! Sequence input parsing used by the CLI.
 
-use std::{fs, path::Path};
+use flate2::read::GzDecoder;
+use std::{fs, io::Read, path::Path};
 
 /// A normalized sequence record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,11 +36,28 @@ pub fn read_sequence_records(
         )]),
         (None, Some(path)) => {
             let path = path.as_ref();
-            let bytes = fs::read(path)
-                .map_err(|err| format!("failed to read {label} file {}: {err}", path.display()))?;
+            let bytes = read_sequence_bytes(path, label)?;
             parse_sequence_file(&bytes, label, path)
         }
     }
+}
+
+fn read_sequence_bytes(path: &Path, label: &str) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(path)
+        .map_err(|err| format!("failed to read {label} file {}: {err}", path.display()))?;
+    if path.extension().and_then(|value| value.to_str()) != Some("gz") {
+        return Ok(bytes);
+    }
+    let mut decoded = Vec::new();
+    GzDecoder::new(bytes.as_slice())
+        .read_to_end(&mut decoded)
+        .map_err(|err| {
+            format!(
+                "failed to decompress {label} file {}: {err}",
+                path.display()
+            )
+        })?;
+    Ok(decoded)
 }
 
 fn parse_sequence_file(
@@ -164,6 +182,8 @@ fn normalize_sequence(bytes: &[u8], label: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
 
     #[test]
     fn parses_wrapped_fasta_records() {
@@ -181,5 +201,18 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].sequence, b"AC");
         assert_eq!(records[1].sequence, b"TG");
+    }
+
+    #[test]
+    fn gzip_decoder_accepts_compressed_fasta_bytes() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(b">q\nACGT\n").unwrap();
+        let compressed = encoder.finish().unwrap();
+        let mut decoded = Vec::new();
+        GzDecoder::new(compressed.as_slice())
+            .read_to_end(&mut decoded)
+            .unwrap();
+        let records = parse_sequence_file(&decoded, "query", Path::new("query.fa.gz")).unwrap();
+        assert_eq!(records[0].sequence, b"ACGT");
     }
 }

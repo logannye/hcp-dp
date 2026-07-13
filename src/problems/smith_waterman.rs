@@ -629,7 +629,7 @@ fn cell_idx(row: usize, col: usize, cols: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HcpEngine;
+    use crate::engine::HcpEngine;
 
     #[test]
     fn classic_local_alignment_path_realizes_score() {

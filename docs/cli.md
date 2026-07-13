@@ -1,361 +1,62 @@
-# hcp-align CLI Reference
+# `hcp-align` v0.2 CLI
 
-`hcp-align` is the command-line surface for HCP-DP's verified sequence-alignment
-kernels. It is designed for exact score or distance plus an exact reconstructed
-path, with structured output that can be consumed by scripts and batch
-pipelines.
-
-## Install
-
-```bash
-cargo install --git https://github.com/logannye/hcp-dp --bin hcp-align
-hcp-align --help
-```
-
-From a local checkout, install or run through Cargo:
-
-```bash
-cargo install --path .
-cargo run --bin hcp-align -- global-linear --query ACGT --target ACGT
-```
-
-GitHub alpha builds are available from the repository's Releases page. Each
-artifact includes the `hcp-align` binary, README, license, and a SHA-256
-checksum.
-
-## Commands
-
-| Command | Meaning |
-|---|---|
-| `global-linear` | Global Needleman-Wunsch alignment with a linear gap penalty. |
-| `global-affine` | Global Gotoh alignment with affine gap penalties. |
-| `local-linear` | Smith-Waterman local alignment with a linear gap penalty. |
-| `edit-distance` | Exact Levenshtein edit distance and traceback. |
-| `semiglobal-linear` | Full query aligned against any target interval; target prefix/suffix are free. |
-| `seeded-global-linear` | Minimizer-seeded exact global alignment inside a candidate extension window. |
-
-## Inputs
-
-Each run requires exactly one query source and exactly one target source:
-
-```bash
---query <SEQ>
---target <SEQ>
---query-file <PATH>
---target-file <PATH>
-```
-
-Raw inline input is always a single record. File input may be raw sequence text,
-FASTA, or FASTQ.
-
-FASTA supports wrapped sequence lines. FASTQ supports standard four-line records.
-Wrapped FASTQ is intentionally out of scope for this alpha. Sequences are
-normalized by stripping whitespace and uppercasing ASCII.
-
-For multi-record files, `hcp-align` uses pairwise zip mode: query record `i` is
-aligned to target record `i`. Mismatched record counts return a nonzero error.
-One-vs-many and all-vs-all modes are deferred.
-
-## Output Formats
-
-| Format | Behavior |
-|---|---|
-| `text` | Human-readable output. Multiple pairs print concise repeated summaries. |
-| `json` | One JSON object for one pair; a JSON array for multiple pairs. |
-| `jsonl` | One JSON object per pair. Preferred for batch workflows. |
-| `tsv` | Stable tabular output with detailed fields. |
-| `cigar` | Compact tabular output focused on ids, score/distance, coordinates, and CIGAR. |
-| `paf` | Pairwise mApping Format rows for traceback-producing alignments. |
-| `sam` | SAM records with headers for traceback-producing alignments. |
-
-Per-pair structured output includes:
-
-- `schema_version`
-- `engine`
-- `pair_index`
-- `query_id`, `target_id`
-- `mode`
-- `score` or `distance`
-- optional `backend` for non-default per-problem engines
-- `path_score` when traceback is produced; `null` for score-only edit distance
-- `verification_status`
-- `verified`
-- `query_start`, `query_end`, `target_start`, `target_end`
-- `cigar`
-- `operation_counts` by default
-- `operations` only with `--operation-detail full`
-- `certificate` only with `--certificate`
-- `block_size`
-- `path_length`
-- `summary_build_ms`, `reconstruction_ms`, `verification_ms`
-- `elapsed_ms`
-- `aligned_query`, `aligned_target` when `--show-alignment` is set
-- `error` for failed per-pair records when `--continue-on-error` is used
-
-The schema reference is documented in
-[docs/output-schema.md](output-schema.md), with a formal JSON Schema at
-[`schemas/hcp-align.v1.schema.json`](../schemas/hcp-align.v1.schema.json).
-
-PAF output uses the standard 12 required fields with unknown mapping quality
-`255`. Optional tags include `AS:i` for score-based modes, `NM:i`, `cg:Z` for a
-SAM/PAF-oriented extended CIGAR, `vs:Z` for verification status, and `pi:i` for
-pair index. PAF requires traceback and therefore rejects
-`edit-distance --score-only`.
-
-SAM output emits `@HD` and `@SQ` headers, then one primary forward-strand record
-per successful pair with unknown mapping quality `255`, unknown qualities (`*`),
-reference-oriented CIGAR, and soft clipping for query bases outside a local
-trace. Tags include `AS:i` for score-based modes, `NM:i`, `VS:Z`, and `PI:i`.
-SAM requires traceback and therefore rejects `edit-distance --score-only`.
-
-## Seeded Extension
-
-`seeded-global-linear` uses minimizers to find exact shared k-mers, chains
-monotone seed hits, expands the selected chain by a flank, then runs exact
-Needleman-Wunsch alignment inside that candidate window:
-
-```bash
-seeded-global-linear --seed-k <N> --seed-window <N> --seed-flank <N>
-```
-
-The reported coordinates are original input coordinates. The score and CIGAR are
-exact for the selected extension window, not for the full pair. If no shared
-minimizer seed is found, the command fails and suggests smaller seed parameters
-or `global-linear`.
-
-`verified` remains for simple compatibility with earlier JSON output. New
-consumers should use `verification_status`.
-
-Trace detail is controlled with:
-
-```bash
---operation-detail none|summary|full
-```
-
-The default is `summary`, which emits compact operation counts instead of a
-full per-step operation array. Use `full` when downstream tooling needs every
-match, mismatch, insertion, and deletion step.
-
-Write output to a file with:
-
-```bash
---output <PATH>
-```
-
-Progress is controlled with:
-
-```bash
---progress auto|always|never
-```
-
-Progress is always written to stderr. The default `auto` only prints progress
-for multi-record runs when stderr is attached to a terminal.
-
-Emit a compact proof-carrying result certificate with:
-
-```bash
---certificate
-```
-
-The certificate is intended for JSON/JSONL consumers. It hashes the normalized
-query, normalized target, scoring parameters, result fields, and traceback
-operations with SHA-256. Score-only edit-distance records include the same
-input/parameter/result hashes but set `trace_sha256` to `null` because no path
-is produced.
-
-Batch execution can continue after per-pair failures:
-
-```bash
---continue-on-error
-```
-
-Without this flag, per-pair errors fail fast. With it, failed pairs are emitted
-as records with `verification_status = "failed"` and an `error` field; the
-process still exits nonzero if any record failed.
-
-Threaded batch execution:
-
-```bash
---threads <N>
-```
-
-Values above `1` require building with the crate's `parallel` feature. Without
-that feature, only `--threads 1` is accepted.
-
-## Verification
-
-`hcp-align` always computes an independent path score from the returned path.
-
-With `--verify`, it also runs a full-table baseline when:
+## `solve`
 
 ```text
-max(query_len, target_len) <= --verify-limit
+hcp-align solve <MODE> [INPUT] [SCORING] [OUTPUT]
 ```
 
-The default `--verify-limit` is `2048`. Use `--verify-limit 0` to remove the
-limit.
+Modes are `edit-distance`, `global-linear`, `global-affine`, `local-linear`, and
+`semiglobal-linear`. Provide exactly one query source and one target source with
+`--query`/`--target` or `--query-file`/`--target-file`.
 
-Verification statuses:
+Important options:
 
-| Status | Meaning |
-|---|---|
-| `full` | Path score and full-table baseline both matched the reported objective. |
-| `path_only` | Path score matched, but full-table baseline was not requested or was above the limit. |
-| `failed` | Path scoring or full-table baseline disagreed; process exits nonzero. |
+- `--scope alignment|score`
+- `--backend auto|hcp|banded-affine`
+- `--band N`
+- `--cross-check`
+- `--operations`
+- `--integrity`
+- `--format text|json|jsonl|paf|sam`
 
-## Scoring
+Affine scoring applies `gap_open + gap_extend` to the first gap position and
+`gap_extend` to each continuation.
 
-Linear modes:
-
-```bash
---match <N>
---mismatch-penalty <N>
---gap <NEGATIVE_N>
-```
-
-Affine mode:
-
-```bash
---match <N>
---mismatch-penalty <N>
---gap-open <NEGATIVE_N>
---gap-extend <NEGATIVE_N>
-```
-
-Affine convention: the first position in a gap costs
-`gap_open + gap_extend`; each continued gap position costs `gap_extend`.
-
-Affine traceback backend selection:
-
-```bash
-global-affine --engine hcp|wavefront|auto
-global-affine --wavefront-band <N>
-```
-
-`hcp` is the default generic summary-tree traceback engine and is the only
-affine engine that accepts `--block-size`. `wavefront` is an exact
-diagonal-band affine traceback backend for low-difference global alignments; it
-uses `--wavefront-band` as the diagonal half-band and fails if the optimum is
-outside that band. `auto` tries the same band first and falls back to HCP
-linear-space traceback when needed.
-
-For `global-linear`, `global-affine`, `local-linear`, and
-`semiglobal-linear`, substitution scoring can use a named or custom matrix
-instead of match/mismatch scoring:
-
-```bash
---matrix blosum62
---matrix-file <PATH>
-```
-
-`--matrix` and `--matrix-file` are mutually exclusive. When either is present,
-the matrix supplies all substitution scores and `--match` /
-`--mismatch-penalty` are ignored. Matrix inputs are validated before alignment,
-so unsupported symbols fail with the query or target record id. Custom matrix
-files are whitespace-delimited square tables with a header row and matching row
-labels:
+## `verify`
 
 ```text
-  A C
-A 2 -1
-C -1 3
+hcp-align verify --alignment PATH --format json|jsonl|paf|sam INPUT [OPTIONS]
 ```
 
-Edit distance has fixed unit costs: substitution, insertion, and deletion cost
-`1`.
+`--level optimal` is the default. `--max-cells` defaults to 25,000,000 and `0`
+means unlimited. PAF and SAM additionally require `--mode` and applicable
+scoring flags. JSON v2 records embed their problem definitions.
 
-Edit-distance backend selection:
+Imported records resolve query and target sequences by ID. Duplicate or missing
+IDs are errors. PAF/SAM reverse-strand records are rejected in v0.2 rather than
+being silently mis-normalized.
 
-```bash
---engine auto|hcp|hcp-linear|adaptive-banded|myers
+## `compare`
+
+```text
+hcp-align compare \
+  --left LEFT --left-format FORMAT \
+  --right RIGHT --right-format FORMAT \
+  INPUT
 ```
 
-`auto` is the default. It first attempts an exact bounded banded traceback for
-near matches and falls back to HCP linear-space traceback when the optimum is
-outside the auto band. `hcp` is the generic summary-tree traceback engine.
-`hcp-linear` uses the same HCP contract with one-layer blocks to minimize
-retained state. `adaptive-banded` is an exact specialized traceback backend for
-low-edit-distance inputs; it ignores HCP block sizing and rejects
-`--block-size`. `myers` is exact score-only bit-vector distance; use it with
-`--score-only`.
+Both records are exactly verified. Different traces with the same valid optimum
+are reported as tie-breaking differences and remain equivalent. JSON comparison
+artifacts embed normalized sequence text and omit timings and expanded operation
+arrays so they can be attached to an issue and replayed without the original
+FASTA/FASTQ files.
 
-`edit-distance --score-only` omits traceback, CIGAR, aligned strings, operation
-counts, and `path_score`. With `--engine auto`, score-only mode selects the
-arbitrary-length Myers backend. With `--verify`, it can still compare the
-reported distance against a full-table baseline when the pair is within
-`--verify-limit`.
+## Exit codes
 
-`--block-size` is accepted only with explicit HCP engines: `hcp` and
-`hcp-linear`.
-
-## Examples
-
-```bash
-hcp-align global-linear \
-  --query GATTACA --target GCATGCU \
-  --match 1 --mismatch-penalty 1 --gap -1 \
-  --verify --format json
-```
-
-```bash
-hcp-align global-affine \
-  --query ACB --target A \
-  --match 2 --mismatch-penalty 1 --gap-open -3 --gap-extend -1 \
-  --verify --format json
-```
-
-```bash
-hcp-align edit-distance \
-  --query-file reads.fa --target-file references.fa \
-  --verify --format jsonl --output results.jsonl
-```
-
-```bash
-hcp-align edit-distance \
-  --score-only \
-  --query kitten --target sitting \
-  --verify --format json
-```
-
-```bash
-hcp-align edit-distance \
-  --engine adaptive-banded \
-  --query ACGTACGT --target ACGTTCGT \
-  --verify --format json
-```
-
-The repository includes small sample files under `examples/data/`:
-
-```bash
-hcp-align edit-distance \
-  --query-file examples/data/reads.fa \
-  --target-file examples/data/references.fa \
-  --verify --format jsonl
-```
-
-```bash
-hcp-align edit-distance \
-  --query-file reads.fa --target-file references.fa \
-  --format jsonl --operation-detail none --progress always
-```
-
-```bash
-hcp-align semiglobal-linear \
-  --query ACGT --target TTACGTTT \
-  --match 2 --mismatch-penalty 1 --gap -2 \
-  --verify --show-alignment --format text
-```
-
-## Known Limitations
-
-- Batch mode is pairwise zip only.
-- Wrapped FASTQ is not supported.
-- No SAM/BAM/PAF export yet.
-- Protein substitution matrices are not implemented; scoring is match/mismatch.
-- Multi-threaded batch mode requires the optional `parallel` feature.
-- `adaptive-banded` edit-distance traceback is exact but worst-case quadratic
-  when inputs are far from the main diagonal.
-- `--certificate` hashes the emitted result and trace; it is not a formal proof
-  system and does not replace independent score/path validation.
-- Performance is still reported conservatively until release artifacts include
-  larger reproducible benchmarks.
+| Code | Meaning |
+|---:|---|
+| 0 | Requested assurance passed for every record. |
+| 1 | Invalid, incorrectly scored, or non-optimal record. |
+| 2 | Usage, parsing, source-resolution, or configuration error. |
+| 3 | Inconclusive verification or internal verification error. |

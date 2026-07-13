@@ -340,7 +340,7 @@ fn nw_last_row(x: &[u8], y: &[u8], scoring: &SubstitutionScoring, gap_penalty: i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{scoring::SubstitutionScoring, HcpEngine};
+    use crate::{engine::HcpEngine, scoring::SubstitutionScoring};
 
     #[test]
     fn audit_regression_path_realizes_score() {

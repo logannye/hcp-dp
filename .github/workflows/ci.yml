@@ -48,7 +48,7 @@ jobs:
     name: Feature Checks
     strategy:
       matrix:
-        features: [parallel, tracing, "parallel tracing"]
+        features: [parallel, tracing, "parallel tracing", experimental-hcp]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

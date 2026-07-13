@@ -21,7 +21,9 @@ jobs:
       - name: Validate HCP-DP scores against external libraries
         run: python scripts/validate_external.py --required
       - name: Generate correctness and performance report
-        run: python scripts/perf_report.py --external-required --verify-limit 512
+        run: |
+          cargo bench --bench oracle_perf
+          python scripts/perf_report.py
       - name: Upload report artifact
         uses: actions/upload-artifact@v6
         with:

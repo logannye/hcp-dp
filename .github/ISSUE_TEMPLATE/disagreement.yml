@@ -1,0 +1,38 @@
+name: Backend disagreement
+description: Report a score, validity, coordinate, or traceback disagreement between alignment engines.
+title: "[Disagreement]: "
+labels: ["bug", "differential"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Different CIGARs may be equally optimal. Please attach the `hcp-align compare` JSON artifact so objective and tie-breaking differences can be assessed separately.
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Comparison artifact
+      description: Paste or attach the minimized `hcp-align.v2` comparison record.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction command
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Backend versions
+      description: Include hcp-align and every external engine version.
+    validations:
+      required: true
+  - type: textarea
+    id: convention
+    attributes:
+      label: Scoring and gap conventions
+      description: Note any translations applied to match scoring, affine gaps, clipping, or coordinates.
+    validations:
+      required: true

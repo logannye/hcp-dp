@@ -510,7 +510,8 @@ pub fn trace_adaptive_banded(x: &[u8], y: &[u8]) -> EditDistanceTrace {
 ///
 /// This is a distance-only backend. It computes the exact edit distance in
 /// `O(ceil(pattern.len() / 64) * text.len())` word operations and stores no
-/// traceback path. Use [`EditDistanceProblem`] with [`crate::HcpEngine`] when
+/// traceback path. Use [`EditDistanceProblem`] with
+/// [`crate::experimental::hcp::HcpEngine`] when
 /// an exact reconstructed path is required.
 pub fn distance_myers(pattern: &[u8], text: &[u8]) -> u32 {
     const WORD_BITS: usize = u64::BITS as usize;
@@ -696,7 +697,7 @@ fn edit_last_row(x: &[u8], y: &[u8]) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HcpEngine;
+    use crate::engine::HcpEngine;
 
     #[test]
     fn kitten_sitting_distance_is_three() {

@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/logannye/hcp-dp/blob/main/schemas/hcp-align.v2.schema.json",
+  "title": "hcp-align v2 record",
+  "oneOf": [
+    { "$ref": "#/$defs/alignment_record" },
+    { "$ref": "#/$defs/verification_record" },
+    { "$ref": "#/$defs/comparison_record" },
+    { "$ref": "#/$defs/error_record" }
+  ],
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "required": ["name", "version", "backend"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "commit": { "type": "string" },
+        "backend": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "sequence": {
+      "type": "object",
+      "required": ["id", "length", "sha256"],
+      "properties": {
+        "id": { "type": "string" },
+        "length": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "pair": {
+      "type": "object",
+      "required": ["index", "query", "target"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "query": { "$ref": "#/$defs/sequence" },
+        "target": { "$ref": "#/$defs/sequence" }
+      },
+      "additionalProperties": false
+    },
+    "substitution": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "match_score", "mismatch_penalty"],
+          "properties": {
+            "kind": { "const": "match-mismatch" },
+            "match_score": { "type": "integer" },
+            "mismatch_penalty": { "type": "integer" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "blosum62" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "name", "alphabet", "scores"],
+          "properties": {
+            "kind": { "const": "matrix" },
+            "name": { "type": "string" },
+            "alphabet": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 1 }
+            },
+            "scores": {
+              "type": "array",
+              "items": { "type": "array", "items": { "type": "integer" } }
+            },
+            "source_sha256": { "$ref": "#/$defs/sha256" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "scoring": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "edit-distance" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "substitution", "gap"],
+          "properties": {
+            "kind": { "const": "linear" },
+            "substitution": { "$ref": "#/$defs/substitution" },
+            "gap": { "type": "integer" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "substitution", "gap_open", "gap_extend"],
+          "properties": {
+            "kind": { "const": "affine" },
+            "substitution": { "$ref": "#/$defs/substitution" },
+            "gap_open": { "type": "integer" },
+            "gap_extend": { "type": "integer" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "problem": {
+      "type": "object",
+      "required": ["mode", "scoring"],
+      "properties": {
+        "mode": {
+          "enum": ["edit-distance", "global-linear", "global-affine", "local-linear", "semiglobal-linear"]
+        },
+        "scoring": { "$ref": "#/$defs/scoring" }
+      },
+      "additionalProperties": false
+    },
+    "span": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "objective": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "enum": ["score", "distance"] },
+        "value": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "trace": {
+      "type": "object",
+      "required": ["query_span", "target_span", "cigar"],
+      "properties": {
+        "query_span": { "$ref": "#/$defs/span" },
+        "target_span": { "$ref": "#/$defs/span" },
+        "cigar": { "type": "string", "pattern": "^([1-9][0-9]*[=XID])*$" },
+        "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": ["op", "query_pos", "target_pos", "query_base", "target_base"],
+      "properties": {
+        "op": { "enum": ["match", "mismatch", "insertion", "deletion"] },
+        "query_pos": { "$ref": "#/$defs/nullable_position" },
+        "target_pos": { "$ref": "#/$defs/nullable_position" },
+        "query_base": { "$ref": "#/$defs/nullable_base" },
+        "target_base": { "$ref": "#/$defs/nullable_base" }
+      },
+      "additionalProperties": false
+    },
+    "nullable_position": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "const": null }
+      ]
+    },
+    "nullable_base": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 1 },
+        { "const": null }
+      ]
+    },
+    "alignment": {
+      "type": "object",
+      "required": ["objective"],
+      "properties": {
+        "objective": { "$ref": "#/$defs/objective" },
+        "trace": { "$ref": "#/$defs/trace" }
+      },
+      "additionalProperties": false
+    },
+    "check": {
+      "type": "object",
+      "required": ["name", "passed"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "required": ["level", "status", "checks"],
+      "properties": {
+        "level": { "enum": ["structure", "score", "optimal"] },
+        "status": { "enum": ["verified", "invalid", "inconclusive", "error"] },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+        "reference_backend": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["elapsed_ms", "work_cells"],
+      "properties": {
+        "elapsed_ms": { "type": "number", "minimum": 0 },
+        "work_cells": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["version", "hash_algorithm", "deterministic_fields_sha256"],
+      "properties": {
+        "version": { "const": "hcp-align.integrity.v1" },
+        "hash_algorithm": { "const": "sha256" },
+        "deterministic_fields_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "alignment_record": {
+      "type": "object",
+      "required": ["schema_version", "record_type", "producer", "pair", "problem", "alignment", "verification"],
+      "properties": {
+        "schema_version": { "const": "hcp-align.v2" },
+        "record_type": { "const": "alignment" },
+        "producer": { "$ref": "#/$defs/producer" },
+        "pair": { "$ref": "#/$defs/pair" },
+        "problem": { "$ref": "#/$defs/problem" },
+        "alignment": { "$ref": "#/$defs/alignment" },
+        "verification": { "$ref": "#/$defs/verification" },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "integrity": { "$ref": "#/$defs/integrity" }
+      },
+      "additionalProperties": false
+    },
+    "verification_record": {
+      "type": "object",
+      "required": ["schema_version", "record_type", "pair", "problem", "submitted", "verification", "metrics"],
+      "properties": {
+        "schema_version": { "const": "hcp-align.v2" },
+        "record_type": { "const": "verification" },
+        "pair": { "$ref": "#/$defs/pair" },
+        "problem": { "$ref": "#/$defs/problem" },
+        "submitted": { "$ref": "#/$defs/alignment" },
+        "verification": { "$ref": "#/$defs/verification" },
+        "metrics": { "$ref": "#/$defs/metrics" }
+      },
+      "additionalProperties": false
+    },
+    "comparison_record": {
+      "type": "object",
+      "required": ["schema_version", "record_type", "inputs", "pair", "problem", "left", "right", "objectives_equal", "traces_equal", "equivalent", "differences"],
+      "properties": {
+        "schema_version": { "const": "hcp-align.v2" },
+        "record_type": { "const": "comparison" },
+        "inputs": {
+          "type": "object",
+          "required": ["query", "target"],
+          "properties": {
+            "query": { "type": "string" },
+            "target": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "pair": { "$ref": "#/$defs/pair" },
+        "problem": { "$ref": "#/$defs/problem" },
+        "left": { "$ref": "#/$defs/alignment_record" },
+        "right": { "$ref": "#/$defs/alignment_record" },
+        "objectives_equal": { "type": "boolean" },
+        "traces_equal": { "type": "boolean" },
+        "equivalent": { "type": "boolean" },
+        "differences": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "error_record": {
+      "type": "object",
+      "required": ["schema_version", "record_type", "error"],
+      "properties": {
+        "schema_version": { "const": "hcp-align.v2" },
+        "record_type": { "const": "error" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

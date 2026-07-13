@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an algorithm, CLI workflow, output format, or validation target.
+description: Suggest an oracle workflow, format improvement, or validation target.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -14,7 +14,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: Describe the command, API, algorithm, or documentation change you want.
+      description: Describe how the change improves exact solving, verification, or comparison.
     validations:
       required: true
   - type: dropdown
@@ -24,8 +24,10 @@ body:
       options:
         - hcp-align CLI
         - Rust library API
-        - Dynamic-programming kernel
-        - Validation or benchmarks
+        - Record verification
+        - Backend comparison
+        - Differential corpus or benchmarks
+        - Experimental HCP engine
         - Documentation
         - Other
     validations:

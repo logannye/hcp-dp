@@ -10,12 +10,12 @@
 - [ ] `cargo test --workspace`
 - [ ] `bash scripts/check.sh`
 
-## Contract Impact
+## Oracle Contract Impact
 
-- [ ] No exported problem contract changed.
-- [ ] Summary laws remain covered by tests.
-- [ ] Returned paths remain independently scored.
-- [ ] Full-table or external baselines were updated where applicable.
+- [ ] Canonical CIGAR, coordinate, scoring, and gap semantics remain explicit.
+- [ ] Returned paths are independently rescored.
+- [ ] Reference optimum and multiple-optimum behavior remain covered by tests.
+- [ ] JSON/PAF/SAM fixtures and checked baselines were updated where applicable.
 
 ## Public Surface
 

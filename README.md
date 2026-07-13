@@ -1,421 +1,178 @@
-# HCP-DP
+# HCP-DP / `hcp-align`
 
 [![CI](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml/badge.svg)](https://github.com/logannye/hcp-dp/actions/workflows/ci.yml)
-[![MSRV 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-orange.svg)](Cargo.toml)
 [![License: MIT](https://img.shields.io/github/license/logannye/hcp-dp.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/logannye/hcp-dp?include_prereleases&label=release)](https://github.com/logannye/hcp-dp/releases)
 
-HCP-DP is a Rust dynamic-programming engine for **exact traceback without
-storing full DP tables**, plus the `hcp-align` CLI for sequence alignment.
+`hcp-align` is a pure-Rust exact alignment oracle. It generates trusted reference
+alignments, verifies JSON/PAF/SAM records against their source sequences, and
+compares alignment backends without treating different but equally optimal
+tracebacks as failures.
 
-The project is built around height-compressed dynamic-programming summaries:
-interval operators that compose like the original recurrence and still allow an
-exact path to be reconstructed. The current alpha focuses its CLI on
-biosequence-style alignment, where correctness can be checked against
-independent baselines and the workflow is immediately useful. The Rust library
-also includes dynamic time warping as an early proof that the contract is not
-limited to sequence-alignment recurrences, plus a sparse layered-DAG longest
-path problem as a proof point for graph-shaped frontiers and a dense Viterbi
-problem as a proof point for HMM-style dynamic programs.
+It is designed for aligner maintainers, bioinformatics infrastructure engineers,
+and pipeline QA teams investigating CIGAR, coordinate, scoring, and optimality
+problems. It is not a read mapper, reference index, variant caller, or claim to
+be the fastest alignment implementation.
 
-## What You Can Use Today
+## Why use it?
 
-`hcp-align` supports:
+- Produce an exact reference result for a sequence pair without depending on a
+  production mapper's heuristics or tie-breaking policy.
+- Find malformed CIGARs, spans, tags, digests, scoring conventions, and false
+  optimality claims with named, auditable checks.
+- Compare backends by validity and objective first, preserving different but
+  equally optimal alignments as legitimate results.
+- Export a compact disagreement artifact with normalized inputs, scoring, and
+  backend provenance for regression tests and bug reports.
 
-- Levenshtein edit distance with deterministic `--engine auto` selection and an
-  exact adaptive-banded traceback backend for low-edit-distance pairs.
-- Levenshtein score-only mode with an exact arbitrary-length Myers bit-vector
-  backend for fast distance queries that do not need traceback.
-- Global Needleman-Wunsch alignment with linear gaps.
-- Global Gotoh alignment with affine gaps, including an exact diagonal-band
-  wavefront-style traceback backend.
-- Smith-Waterman local alignment with linear gaps.
-- Semi-global alignment of a full query against any target interval.
-- Minimizer-seeded exact extension with global alignment inside the selected
-  candidate window.
-- Sparse layered-DAG longest path as a library proof point for graph frontiers.
-- Dense Viterbi decoding as a library proof point for HMM-style recurrences.
-- Bit-parallel LCS length scoring for short targets, used as an optimized
-  exact baseline.
-- Match/mismatch scoring, built-in BLOSUM62, and custom substitution matrices
-  for score-based alignment modes.
-- Single-record inline input and pairwise multi-record FASTA/FASTQ batch input.
-- Text, JSON, JSONL, TSV, compact CIGAR-style output, PAF, and SAM export.
-- Lightweight Python subprocess binding over the CLI JSON contract.
-- Optional SHA-256 result certificates for proof-carrying JSON/JSONL records.
-- Independent path scoring for every result, with optional full-table
-  verification on bounded inputs.
-
-This is an alpha release. The public surface is intentionally narrow: shipped
-problems must pass the contract harness, and performance claims are limited to
-the generated reports in this repository.
-
-## Quickstart
-
-Install the CLI from the repository:
+## Install
 
 ```bash
 cargo install --git https://github.com/logannye/hcp-dp --bin hcp-align
 ```
 
-Or clone the repo and install locally:
+The v0.2 series is a breaking pre-1.0 reset; see the migration guide before
+upgrading an existing CLI, JSON, or Rust integration.
+
+## Generate an exact reference
 
 ```bash
-git clone https://github.com/logannye/hcp-dp.git
-cd hcp-dp
-cargo install --path .
-```
-
-Run a verified edit-distance alignment:
-
-```bash
-hcp-align edit-distance \
+hcp-align solve edit-distance \
   --query kitten \
   --target sitting \
-  --verify \
+  --cross-check \
+  --integrity \
   --format json
 ```
 
-Representative output excerpt:
+The result is an `hcp-align.v2` alignment record containing normalized sequence
+identities and digests, the complete problem definition, exact objective,
+canonical SAM-oriented CIGAR, named checks, backend provenance, optional
+metrics, and an optional integrity fingerprint.
 
-```json
-{
-  "schema_version": "hcp-align.v1",
-  "engine": "hcp-dp",
-  "mode": "edit-distance",
-  "backend": "adaptive-banded",
-  "distance": 3,
-  "path_score": 3,
-  "verification_status": "full",
-  "cigar": "1X3=1X1=1I"
-}
-```
+Supported solve modes:
 
-`edit-distance` defaults to `--engine auto`. Auto first tries a bounded exact
-banded traceback and falls back to HCP linear-space traceback when the pair is
-outside the auto band. For reproducible backend comparisons, choose an engine
-explicitly:
+- `edit-distance`
+- `global-linear`
+- `global-affine`
+- `local-linear`
+- `semiglobal-linear`
 
-```bash
-hcp-align edit-distance \
-  --engine adaptive-banded \
-  --query ACGTACGT \
-  --target ACGTTCGT \
-  --verify \
-  --format json
-```
+FASTA and FASTQ sources may be plain text or gzip-compressed (`.gz`).
 
-When only the distance is needed, `--score-only` uses the exact Myers
-bit-vector backend and omits traceback, CIGAR, operations, and `path_score`:
+Use `--scope score` for an objective without traceback. Every traceback is
+rescored independently. `--cross-check` additionally compares the objective
+with the rolling-frontier reference implementation.
+
+## Verify external records
+
+Native JSON embeds the alignment mode and scoring definition:
 
 ```bash
-hcp-align edit-distance \
-  --score-only \
-  --query kitten \
-  --target sitting \
-  --verify \
-  --format json
-```
-
-Batch FASTA/FASTQ input uses pairwise zip mode: query record `i` is aligned to
-target record `i`.
-
-```bash
-hcp-align edit-distance \
-  --query-file reads.fa \
+hcp-align verify \
+  --alignment result.json \
+  --format json \
+  --query-file queries.fa \
   --target-file references.fa \
-  --verify \
-  --format jsonl \
-  --operation-detail none \
-  --output results.jsonl
+  --output-format json
 ```
 
-Prebuilt alpha binaries are available from
-[GitHub Releases](https://github.com/logannye/hcp-dp/releases). Each release
-artifact includes the `hcp-align` binary, README, license, and SHA-256 checksum.
-
-## Why It Is Different
-
-Classic DP traceback stores every cell:
-
-```text
-time  = Θ(TF)
-space = Θ(TF)
-```
-
-where `T` is the number of layers and `F` is the frontier width.
-
-HCP-DP treats an interval of layers as a composable summary:
-
-```mermaid
-flowchart LR
-    A["frontier at a"] --> B["summary Σ[a,m]"]
-    B --> C["frontier at m"]
-    C --> D["summary Σ[m,c]"]
-    D --> E["frontier at c"]
-
-    B -. merge .-> F["summary Σ[a,c]"]
-    D -. merge .-> F
-```
-
-The engine computes the final objective with summary operators, then
-reconstructs an exact path by recursively selecting endpoint-constrained split
-boundaries. The returned path is not trusted by convention: tests and CLI
-verification score it independently.
-
-For block height `b`, summary size `sigma`, and output path length `L`, the
-generic checkpoint memory model is:
-
-```text
-HCP checkpoint space = Θ(T*sigma/b + bF + L)
-```
-
-For the shipped sequence problems, summaries are lightweight interval
-descriptors. With `b = 1`, HCP-DP exposes a reusable linear-space exact traceback
-regime:
-
-```text
-HCP linear-space traceback = Θ(T + F + L)
-```
-
-The broader strategy is to pair that exact-path contract with specialized
-frontiers where structure permits better time complexity. Edit distance is the
-first proof point:
-
-| Engine | Exact path | Useful regime | Complexity |
-|---|---:|---|---|
-| `auto` | yes | default deterministic backend policy | bounded banded attempt, then HCP fallback |
-| `hcp` | yes | generic summary-tree traceback | quadratic score work, sub-table memory |
-| `hcp-linear` | yes | minimal retained checkpoint state | quadratic score work, linear retained state |
-| `adaptive-banded` | yes | low edit distance `s` | roughly `O(n*s)`, worst-case quadratic |
-| `myers` | no | score-only edit distance | `O(ceil(n/64) * m)` bit-vector scoring |
-| `myers-u64` | no | patterns up to 64 symbols | bit-parallel exact distance |
-
-In the generated local report, a 2048 bp near-match case with four edits ran in
-about `0.009s` with exact adaptive-banded traceback, compared with about
-`0.32s` for rolling-row score-only DP, `0.37s` for full-table score-only DP, and
-about `1.0s` for generic HCP exact traceback. Run the report locally to measure
-your machine:
+PAF and SAM require an explicit problem definition because those formats do not
+fully encode alignment scoring:
 
 ```bash
-cargo run --bin scale_probe -- \
-  --mode edit-distance-deep \
-  --engine adaptive-banded-path \
-  --max-size 2048 \
-  --format table
-```
-
-## Alignment Examples
-
-Global Needleman-Wunsch:
-
-```bash
-hcp-align global-linear \
-  --query GATTACA \
-  --target GCATGCU \
-  --match 1 \
-  --mismatch-penalty 1 \
-  --gap -1 \
-  --verify \
-  --format json
-```
-
-Affine-gap global alignment:
-
-```bash
-hcp-align global-affine \
-  --query ACB \
-  --target A \
+hcp-align verify \
+  --alignment records.sam \
+  --format sam \
+  --query-file queries.fa \
+  --target-file references.fa \
+  --mode global-affine \
   --match 2 \
   --mismatch-penalty 1 \
-  --gap-open -3 \
-  --gap-extend -1 \
-  --verify \
-  --format json
+  --gap-open -6 \
+  --gap-extend -1
 ```
 
-Affine low-difference alignment with the wavefront-style backend:
+Verification levels:
+
+| Level | Checks |
+|---|---|
+| `structure` | Schema, identifiers, lengths, spans, CIGAR legality and consumption. |
+| `score` | Structure plus bases and independently realized objective. |
+| `optimal` | Score plus agreement with an exact rolling-frontier optimum. Default. |
+
+Exact verification refuses work above 25,000,000 DP cells by default and reports
+`inconclusive`; it never silently weakens the requested assurance. Change the
+limit with `--max-cells`, use `--max-cells 0` for unlimited work, or explicitly
+request `--level score`.
+
+Exit codes are stable:
+
+- `0`: every record satisfies the requested level;
+- `1`: at least one record is invalid or non-optimal;
+- `2`: command, input, or configuration error;
+- `3`: at least one record is inconclusive or verification encountered an
+  internal error.
+
+## Compare results
 
 ```bash
-hcp-align global-affine \
-  --query ACGTACGT \
-  --target ACGTTACGT \
-  --engine wavefront \
-  --wavefront-band 2 \
-  --verify \
-  --format json
+hcp-align compare \
+  --left backend-a.json --left-format json \
+  --right backend-b.json --right-format json \
+  --query-file queries.fa \
+  --target-file references.fa \
+  --output-format json
 ```
 
-Smith-Waterman local alignment:
+Comparison first verifies both records exactly. Equal optimal objectives are
+considered equivalent even when tie-breaking produces different CIGARs.
 
-```bash
-hcp-align local-linear \
-  --query ACACACTA \
-  --target AGCACACA \
-  --match 2 \
-  --mismatch-penalty 1 \
-  --gap -2 \
-  --verify \
-  --format json
+## Canonical semantics
+
+Public CIGAR follows SAM orientation:
+
+- `=` and `X` consume query and target;
+- `I` consumes query only;
+- `D` consumes target only.
+
+JSON and PAF coordinates are zero-based and half-open. SAM conversion is
+isolated at the format boundary. The verifier currently accepts primary
+forward-strand SAM/PAF records; reverse-strand normalization and BAM/CRAM are
+out of scope for v0.2.
+
+## Rust API
+
+The supported library surface includes:
+
+- `AlignmentRecord`, `AlignmentMode`, `AlignmentSpan`, `Cigar`, and `CigarOp`;
+- `ScoringScheme`, `GapModel`, and `SubstitutionScheme`;
+- `SolveRequest`, `SolveOptions`, and `solve`;
+- `VerificationRequest`, `VerificationLevel`, `VerificationReport`, and `verify`;
+- JSON, JSONL, PAF, and SAM readers/writers under `hcp_dp::oracle`.
+
+The generic height-compressed DP machinery is intentionally unstable and only
+available with:
+
+```toml
+hcp-dp = { version = "0.2.0-alpha.1", features = ["experimental-hcp"] }
 ```
 
-Protein alignment with BLOSUM62:
+It lives under `hcp_dp::experimental::hcp` and carries no v0.2 compatibility
+promise.
 
-```bash
-hcp-align global-linear \
-  --query MTEYK \
-  --target MTDYK \
-  --matrix blosum62 \
-  --gap -4 \
-  --verify \
-  --format json
-```
+## Integrity fingerprints
 
-Semi-global alignment:
+`--integrity` hashes deterministic record fields. Timings are excluded. This
+detects mutation when the expected digest is trusted separately; it is not a
+signature, identity proof, or authenticity guarantee.
 
-```bash
-hcp-align semiglobal-linear \
-  --query ACGT \
-  --target TTACGTTT \
-  --match 2 \
-  --mismatch-penalty 1 \
-  --gap -2 \
-  --verify \
-  --show-alignment \
-  --format text
-```
+## Formats and scope
 
-Minimizer-seeded exact extension:
+Supported contracts are JSON, JSONL, PAF, SAM, and human-readable text. BAM,
+CRAM, TSV, custom CIGAR tables, read mapping, reference indexing, reverse-strand
+mapping, and mapping-quality estimation are not supported.
 
-```bash
-hcp-align seeded-global-linear \
-  --query TTACGTAA \
-  --target GGACGTCC \
-  --seed-k 2 \
-  --seed-window 2 \
-  --seed-flank 1 \
-  --verify \
-  --format json
-```
-
-PAF export for pipeline interoperability:
-
-```bash
-hcp-align edit-distance \
-  --engine hcp \
-  --query ACGT \
-  --target ACGT \
-  --format paf
-```
-
-SAM export is also available for traceback-producing runs:
-
-```bash
-hcp-align edit-distance \
-  --engine hcp \
-  --query ACGT \
-  --target ACGT \
-  --format sam
-```
-
-## Verification Model
-
-Every `hcp-align` result includes:
-
-- the reported score or distance,
-- an independently computed `path_score` when a traceback is produced,
-- half-open query and target coordinates,
-- a CIGAR-like operation string using `=`, `X`, `D`, and `I` when traceback is
-  produced,
-- `verification_status`.
-- optional `certificate` hashes with `--certificate`.
-
-With `--verify`, `hcp-align` also runs a full-table baseline when the larger
-input length is within `--verify-limit`:
-
-```text
-full       path score and full-table baseline matched
-path_only  path score matched, full-table baseline was skipped
-score_only exact score-only backend ran without traceback; full baseline was skipped
-failed     path score or full-table baseline disagreed
-```
-
-The default `--verify-limit` is `2048`; use `--verify-limit 0` to remove the
-limit.
-
-## Rust Library
-
-The crate exposes the summary-tree engine and correctness-tested problem
-implementations:
-
-- `HcpEngine`
-- `HcpEngineBuilder`
-- `HcpProblem`
-- `SummaryApply`
-- `alignment::AlignmentTrace`
-- `contract` validation helpers for custom `HcpProblem` tests
-- `problems::dtw::DtwProblem`
-- `problems::edit_distance::EditDistanceProblem`
-- `problems::lcs::LcsProblem`
-- `problems::nw_align::NwProblem`
-- `problems::nw_affine::NwAffineProblem`
-- `problems::semiglobal::SemiGlobalProblem`
-- `problems::smith_waterman::SmithWatermanProblem`
-
-Example:
-
-```rust
-use hcp_dp::{problems::lcs::LcsProblem, HcpEngine};
-
-let problem = LcsProblem::new(b"CCA", b"C");
-let (cost, path) = HcpEngine::new(problem.clone()).run();
-
-assert_eq!(cost, 1);
-assert_eq!(problem.score_path(&path), Some(cost));
-```
-
-Use `HcpEngine::linear_space(problem)` when retained memory is the priority.
-For a complete custom recurrence, see
-[`examples/custom_problem.rs`](examples/custom_problem.rs), which implements a
-two-state layered shortest-path DP with min-plus interval summaries and runs the
-public `hcp_dp::contract` checks.
-
-## Capability Matrix
-
-| Problem | Exact objective | Exact path | CLI | External validation | Caveat |
-|---|---:|---:|---:|---|---|
-| LCS | yes | yes | no | no | Bit-parallel short-target score baseline. |
-| Needleman-Wunsch, linear gap | yes | yes | yes | Parasail optional | Supports substitution matrices. |
-| Needleman-Wunsch, affine gap | yes | yes | yes | Parasail optional after gap calibration | HCP plus exact diagonal-band `wavefront`. |
-| Smith-Waterman, linear gap | yes | yes | yes | Parasail optional | Returns selected local traceback only. |
-| Edit distance, auto backend | yes | yes | yes | Edlib optional | Default; selects adaptive-banded traceback or HCP fallback. |
-| Edit distance, HCP traceback | yes | yes | yes | Edlib optional | Generic exact traceback engine. |
-| Edit distance, adaptive banded | yes | yes | yes | Edlib optional | Fastest when final edit distance is small. |
-| Edit distance, Myers bit-vector | yes | no | yes, `edit-distance --score-only` | checked internally | Exact distance only; arbitrary pattern length. |
-| Edit distance, Myers u64 | yes | no | report tool only | checked internally | Pattern length must be at most 64 symbols. |
-| Semi-global, linear gap | yes | yes | yes | no external anchor yet | Full query against any target interval. |
-| Minimizer-seeded extension | yes, windowed | yes | yes | checked internally | Exact selected window, not full-pair optimum. |
-| Layered DAG longest path | yes | yes | no | no | Sparse-frontier library proof point. |
-| Viterbi decoding | yes | yes | no | no | HMM-style library proof point. |
-| Dynamic time warping | yes | yes | no | no | Library/report proof point for non-sequence DP. |
-
-See [docs/capabilities.md](docs/capabilities.md) for the full matrix.
-
-## Documentation
-
-- [CLI reference](docs/cli.md)
-- [Technical design](docs/design.md)
-- [Problem author guide](docs/problem-author-guide.md)
-- [Capability matrix](docs/capabilities.md)
-- [Output schema reference](docs/output-schema.md)
-- [Sample report](docs/sample-report.md)
-- [Alpha release checklist](docs/alpha-release-checklist.md)
-- [Technology roadmap](docs/technology-roadmap.md)
-- [Python binding](bindings/python/README.md)
-
-## Validation And Reports
-
-Local checks:
+## Development
 
 ```bash
 cargo fmt --all -- --check
@@ -424,71 +181,13 @@ cargo test --workspace
 bash scripts/check.sh
 ```
 
-Generate a correctness and performance report:
+See:
 
-```bash
-python3 scripts/perf_report.py --scenario edit_distance --verify-limit 128
-```
-
-Nightly performance budgets are defined in `perf/baseline.json` and enforced by
-`.github/workflows/nightly-perf.yml`. Local bench comparison is available with:
-
-```bash
-RUN_BENCH=1 PERF_ENFORCE=1 bash scripts/check.sh
-```
-
-The checked-in [sample report](docs/sample-report.md) is generated from a small
-bounded run to show report structure. It is an example artifact, not a
-performance claim for other machines:
-
-```bash
-python3 scripts/perf_report.py \
-  --scenario edit_distance \
-  --verify-limit 128 \
-  --max-size 128 \
-  --skip-external \
-  --sample-output docs/sample-report.md
-```
-
-Run optional external validation against Parasail and Edlib when installed:
-
-```bash
-python3 scripts/validate_external.py
-python3 scripts/validate_external.py --required
-```
-
-Generated reports are written under `target/hcp-dp-report/`. External validators
-are not runtime dependencies.
-
-## Current Limits
-
-- Alpha APIs, CLI flags, and JSON fields may change before `1.0`.
-- Batch mode is pairwise zip only; one-vs-many and all-vs-all are deferred.
-- Wrapped FASTQ is not supported.
-- SAM/BAM/PAF export is not implemented.
-- Protein substitution matrices are not implemented; scoring is match/mismatch.
-- No claim is made of broad superiority over specialized SIMD aligners.
-- The crate is not published to crates.io yet.
-
-## Adding A New Problem
-
-A new public problem must satisfy the same contract harness as the shipped
-modules:
-
-- summary apply equals direct recurrence replay,
-- summary merge equals the direct combined interval,
-- split boundaries are feasible for both recursive halves,
-- reconstructed segments join exactly,
-- independent path scoring realizes the reported objective,
-- full-table or external baselines agree where applicable.
-
-If the proof is incomplete, keep the module private or behind an experimental
-feature.
-
-The crate exposes reusable bounded-test helpers under `hcp_dp::contract` for
-summary laws, top-level split reconstruction, and all-block-size path checks.
-See the [problem author guide](docs/problem-author-guide.md) for the expected
-test pattern.
+- [CLI reference](docs/cli.md)
+- [v1 to v2 migration](docs/migration-v2.md)
+- [verification-first decision record](docs/adr/0001-verification-first.md)
+- [output schema](docs/output-schema.md)
+- [capability boundary](docs/capabilities.md)
 
 ## License
 

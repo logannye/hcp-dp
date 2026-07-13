@@ -1,99 +1,68 @@
-# Technology Roadmap
+# v0.2 Delivery Roadmap
 
-This roadmap orders the highest-value enhancements in the sequence that should
-compound best if completed one after another. Each item should preserve the
-project rule that public capabilities must report exact objectives and, when a
-traceback is produced, an independently scoreable exact path.
+This roadmap is ordered by end-user evidence. A later milestone does not widen
+the supported product until its gate is met.
 
-## 1. Proof-Carrying Alignment Records
+## Alpha 1: trustworthy oracle contract
 
-Add compact result certificates to structured output. The certificate should
-hash normalized inputs, scoring parameters, traceback operations, result fields,
-and the certificate payload itself. This gives every later backend a stable
-reproducibility envelope for downstream pipelines.
+Status: implemented on the v0.2 development branch.
 
-Status: initial `hcp-align --certificate` support is implemented for JSON and
-JSONL records.
+- Canonical scoring, span, provenance, objective, and SAM-oriented CIGAR types.
+- Exact `solve` for the five supported modes with unconditional path rescoring.
+- Strict JSON v2, PAF, and SAM import/export.
+- Structure, score, and exact-optimal verification with a 25,000,000-cell
+  default refusal budget and explicit `inconclusive` status.
+- Objective-first, tie-aware `compare` with portable compact artifacts.
+- Mutation-specific checks, exhaustive small binary pairs, and a versioned
+  differential corpus covering empty inputs, repeats, homopolymers, skew,
+  long gaps, local resets, free ends, and ambiguous optima.
+- Pure-Rust runtime, gzip sequence input, Python subprocess wrapper, observed
+  solver/verifier/parser baselines, and fixed Criterion registration.
+- Generic HCP machinery isolated under `experimental-hcp`.
 
-## 2. Scoring Matrices And Protein Alignment
+Release candidate: `0.2.0-alpha.1` after every GitHub workflow passes from the
+same commit.
 
-Generalize scoring beyond match/mismatch to named substitution matrices and
-user-provided matrices. This should support protein workflows and give future
-affine and wavefront backends a realistic scoring surface.
+## Alpha 2: bounded batch operation
 
-Status: initial named BLOSUM62 and custom matrix-file support is implemented for
-the score-based CLI modes and the reusable problem constructors.
+Status: next implementation milestone.
 
-## 3. Interoperability Exports
+- Incremental FASTA/FASTQ decoding rather than whole-file accumulation.
+- Bounded in-flight parallel work with deterministic ordered JSONL output.
+- Recoverable per-record `error` records and continuation after pair failures.
+- Peak-RSS scenarios and checked 15% memory budgets.
+- A 100,000-pair batch gate proving memory is proportional to active pairs, not
+  total record count.
+- Disagreement-preserving corpus reduction for internal and external adapters.
 
-Add PAF first, then SAM where the coordinate and CIGAR semantics are clear.
-These formats make HCP-DP usable inside existing read-mapping and comparative
-genomics pipelines.
+No alpha-1 documentation claims these operational properties.
 
-Status: initial PAF and SAM export is implemented for traceback-producing CLI
-records. SAM currently emits primary forward-strand records with generated
-headers and unknown mapping qualities.
+## 0.2 release: distribution and adoption
 
-## 4. Wavefront Affine Traceback Backend
+Status: requires external systems and users.
 
-Implement an exact wavefront-style affine-gap backend for low-difference global
-and extension workloads. It should emit the same path, verification status, and
-certificate fields as the existing HCP and adaptive-banded engines.
+- Publish the crate and generated API documentation after API review.
+- Build Linux, macOS, and Windows artifacts from one tag with checksums, SBOM,
+  signed provenance, and the v2 schema/migration guide.
+- Package the Python client with batch APIs and deterministic binary resolution.
+- Publish reproducible differential reports for Edlib, WFA2, Parasail, and
+  Rust-Bio where their scoring conventions can be translated exactly.
+- Complete discovery with five aligner/library maintainers and hands-on pilots
+  with at least three; turn permitted failures into regression fixtures.
 
-Status: initial exact diagonal-band affine traceback is implemented for
-`global-affine --engine wavefront`, with `--engine auto` fallback to HCP
-linear-space traceback.
+The release gate is three external users independently verifying real records
+or reproducing a backend bug.
 
-## 5. Minimizer-Seeded Exact Extension
+## Experimental HCP SDK
 
-Add minimizer seeding and chaining to find candidate windows, then run exact
-traceback inside those windows. This turns the library from pairwise alignment
-into a practical exact-extension engine for long reads and near-neighbor search.
+Status: demand-gated; no promotion work begins before oracle adoption.
 
-Status: initial deterministic minimizer selection, monotone seed chaining, and
-`seeded-global-linear` exact windowed traceback are implemented.
+Promotion requires a non-replay algebraic summary used during reconstruction,
+a measured benefit, reduced authoring burden, and two external implementers.
+Until then, every HCP authoring API may change without migration support.
 
-## 6. Sparse/DAG Alignment
+## Admission rule
 
-Extend the HCP contract to sparse layered graphs and DAG alignment. This is a
-better showcase for compressed frontier operators than dense rectangular DP and
-opens the path toward pangenome-style workloads.
-
-Status: initial `LayeredDagProblem` sparse longest-path proof point is
-implemented with summary-law and all-block-size contract tests.
-
-## 7. Viterbi And Profile-HMM Traceback
-
-Add a non-sequence-grid probabilistic DP proof point with exact traceback. A
-profile-HMM or generic Viterbi module would demonstrate that HCP-DP is a layered
-DP framework, not only an aligner.
-
-Status: initial dense `ViterbiProblem` is implemented with exact traceback and
-contract tests.
-
-## 8. Optimized Algebraic Summaries
-
-Replace replay-only summaries in selected modules with true algebraic or
-bit-parallel summary operators where they are mathematically justified. Keep the
-contract tests as the admission gate for each optimized summary.
-
-Status: initial bit-parallel LCS length scoring is implemented for targets up to
-128 symbols and wired into `LcsProblem::full_table_len`; HCP path summaries
-remain contract-backed.
-
-## 9. Language And Runtime Bindings
-
-Expose the stable CLI/library surface through Python and WASM bindings after
-the result schema, scoring model, and core backends are less volatile.
-
-Status: initial Python subprocess binding over `hcp-align --format json` is
-implemented under `bindings/python`. WASM remains deferred.
-
-## 10. Enforced Performance Budgets
-
-Populate `perf/baseline.json`, make nightly performance regressions actionable,
-and keep benchmark claims tied to reproducible report commands and artifacts.
-
-Status: representative Criterion median budgets are populated in
-`perf/baseline.json`, `scripts/check_bench.py` enforces slowdowns when
-`PERF_ENFORCE=1`, and scheduled nightly perf runs enforce by default.
+No algorithm, format, binding, or generic DP demonstration enters the stable
+surface unless it directly improves exact solving, record verification, or
+backend comparison, or answers a validated external-user request.

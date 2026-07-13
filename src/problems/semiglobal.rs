@@ -562,7 +562,7 @@ fn cell_idx(row: usize, col: usize, cols: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HcpEngine;
+    use crate::engine::HcpEngine;
 
     #[test]
     fn target_prefix_and_suffix_are_free() {

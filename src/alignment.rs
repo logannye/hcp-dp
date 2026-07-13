@@ -1,15 +1,17 @@
 //! Shared alignment trace formatting.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One alignment operation between query (`s`) and target (`t`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AlignmentOpKind {
     Match,
     Mismatch,
-    GapInTarget,
-    GapInQuery,
+    /// Query insertion relative to the target. Consumes query only (`I`).
+    Insertion,
+    /// Query deletion relative to the target. Consumes target only (`D`).
+    Deletion,
 }
 
 impl AlignmentOpKind {
@@ -17,14 +19,15 @@ impl AlignmentOpKind {
         match self {
             Self::Match => '=',
             Self::Mismatch => 'X',
-            Self::GapInTarget => 'D',
-            Self::GapInQuery => 'I',
+            Self::Insertion => 'I',
+            Self::Deletion => 'D',
         }
     }
 }
 
 /// A single consumed step in an alignment path.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AlignmentStep {
     pub op: AlignmentOpKind,
     pub query_pos: Option<usize>,
@@ -34,7 +37,7 @@ pub struct AlignmentStep {
 }
 
 /// User-facing trace derived from a returned DP path.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlignmentTrace {
     pub query_start: usize,
     pub query_end: usize,
@@ -129,7 +132,7 @@ impl AlignmentTrace {
                         buf.push('-');
                     }
                     AlignmentStep {
-                        op: AlignmentOpKind::GapInTarget,
+                        op: AlignmentOpKind::Insertion,
                         query_pos: Some(a_row),
                         target_pos: None,
                         query_base: Some(query_base),
@@ -149,7 +152,7 @@ impl AlignmentTrace {
                         buf.push(target_base);
                     }
                     AlignmentStep {
-                        op: AlignmentOpKind::GapInQuery,
+                        op: AlignmentOpKind::Deletion,
                         query_pos: None,
                         target_pos: Some(a_col),
                         query_base: None,

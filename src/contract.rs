@@ -4,7 +4,10 @@
 //! contract violations, so they fit naturally inside unit tests and property
 //! tests for custom dynamic-programming problems.
 
-use crate::{HcpEngine, HcpProblem, SummaryApply};
+use crate::{
+    engine::HcpEngine,
+    traits::{HcpProblem, SummaryApply},
+};
 use std::fmt::Debug;
 
 /// Replay direct one-layer transitions from layer `0` through `layer`.

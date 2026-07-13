@@ -1,1115 +1,494 @@
-use serde_json::{json, Value};
-use std::{
-    fs,
-    path::PathBuf,
-    process::{Command, Output},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Output};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_hcp-align")
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(bin())
-        .args(args)
-        .output()
-        .expect("hcp-align must run")
-}
-
-fn temp_file(name: &str, content: &str) -> PathBuf {
-    let mut path = std::env::temp_dir();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock must be after epoch")
-        .as_nanos();
-    path.push(format!("hcp-dp-{name}-{}-{nanos}.txt", std::process::id()));
-    fs::write(&path, content).expect("temp file must be writable");
-    path
+    Command::new(bin()).args(args).output().expect("CLI runs")
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).expect("stdout must be utf8")
+    String::from_utf8(output.stdout.clone()).expect("UTF-8 stdout")
 }
 
 fn stderr(output: &Output) -> String {
-    String::from_utf8(output.stderr.clone()).expect("stderr must be utf8")
+    String::from_utf8(output.stderr.clone()).expect("UTF-8 stderr")
 }
 
-fn with_normalized_timings(mut value: Value) -> Value {
-    value["elapsed_ms"] = json!("<elapsed_ms>");
-    value["summary_build_ms"] = json!("<summary_build_ms>");
-    value["reconstruction_ms"] = json!("<reconstruction_ms>");
-    value["verification_ms"] = json!("<verification_ms>");
-    value
-}
-
-fn normalize_tsv_timings(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let mut fields: Vec<&str> = line.split('\t').collect();
-            let replacements = [
-                "<summary_build_ms>",
-                "<reconstruction_ms>",
-                "<verification_ms>",
-                "<elapsed_ms>",
-            ];
-            if fields.len() >= replacements.len() {
-                let start = fields.len() - replacements.len();
-                for (idx, replacement) in replacements.iter().enumerate() {
-                    if fields[start + idx].parse::<f64>().is_ok() {
-                        fields[start + idx] = replacement;
-                    }
-                }
-            }
-            fields.join("\t")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn assert_sha256(value: &Value) {
-    let text = value.as_str().expect("hash field must be a string");
-    assert_eq!(text.len(), 64);
-    assert!(text.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    assert_eq!(text, text.to_ascii_lowercase());
+fn temp_file(name: &str, content: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("hcp-dp-v2-{nonce}-{name}"));
+    fs::write(&path, content).expect("write temp file");
+    path
 }
 
 #[test]
-fn version_flag_reports_package_version() {
+fn version_reports_v02() {
     let output = run(&["--version"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim(),
-        format!("hcp-align {}", env!("CARGO_PKG_VERSION"))
-    );
+    assert!(output.status.success());
+    assert!(stdout(&output).contains("0.2.0-alpha.1"));
 }
 
 #[test]
-fn raw_json_full_verification_still_works() {
+fn solve_edit_distance_emits_v2_oracle_record() {
     let output = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--cross-check",
+        "--integrity",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let record: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(record["schema_version"], "hcp-align.v2");
+    assert_eq!(record["record_type"], "alignment");
+    assert_eq!(record["alignment"]["objective"]["value"], 3);
+    assert_eq!(record["alignment"]["trace"]["cigar"], "1X3=1X1=1D");
+    assert_eq!(record["verification"]["status"], "verified");
+    assert_eq!(record["integrity"]["hash_algorithm"], "sha256");
+}
+
+#[test]
+fn canonical_cigar_uses_sam_insertion_deletion_orientation() {
+    let insertion = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "ACG",
+        "--target",
+        "AG",
+        "--format",
+        "json",
+    ]);
+    let deletion = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "AG",
+        "--target",
+        "ACG",
+        "--format",
+        "json",
+    ]);
+    let insertion: Value = serde_json::from_str(&stdout(&insertion)).unwrap();
+    let deletion: Value = serde_json::from_str(&stdout(&deletion)).unwrap();
+    assert!(insertion["alignment"]["trace"]["cigar"]
+        .as_str()
+        .unwrap()
+        .contains('I'));
+    assert!(deletion["alignment"]["trace"]["cigar"]
+        .as_str()
+        .unwrap()
+        .contains('D'));
+}
+
+#[test]
+fn every_supported_mode_cross_checks() {
+    let cases: &[(&[&str], i64)] = &[
+        (&["global-linear", "GATTACA", "GCATGCU"], 2),
+        (&["global-affine", "ACB", "A"], -3),
+        (&["local-linear", "ACACACTA", "AGCACACA"], 10),
+        (&["semiglobal-linear", "ACGT", "TTACGTTT"], 8),
+    ];
+    for (case, expected) in cases {
+        let output = run(&[
+            "solve",
+            case[0],
+            "--query",
+            case[1],
+            "--target",
+            case[2],
+            "--cross-check",
+            "--format",
+            "json",
+        ]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(value["alignment"]["objective"]["value"], *expected);
+        assert_eq!(value["verification"]["status"], "verified");
+    }
+}
+
+#[test]
+fn score_scope_omits_traceback() {
+    let output = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--scope",
+        "score",
+        "--format",
+        "json",
+    ]);
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["producer"]["backend"], "myers");
+    assert!(value["alignment"].get("trace").is_none());
+
+    let output = run(&[
+        "solve",
         "global-linear",
         "--query",
         "GATTACA",
         "--target",
         "GCATGCU",
-        "--match",
-        "1",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-1",
-        "--verify",
+        "--scope",
+        "score",
+        "--cross-check",
         "--format",
         "json",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["score"], 0);
-    assert_eq!(json["path_score"], 0);
-    assert_eq!(json["verification_status"], "full");
-    assert_eq!(json["verified"], true);
-    assert_eq!(json["pair_index"], 0);
-    assert_eq!(json["query_id"], "query");
-    assert_eq!(json["target_id"], "target");
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["producer"]["backend"], "hcp");
+    assert_eq!(value["verification"]["status"], "verified");
+    assert!(value["alignment"].get("trace").is_none());
 }
 
 #[test]
-fn single_record_fasta_json_inherits_record_ids() {
-    let query = temp_file("single-query", ">q1\nACGT\n");
-    let target = temp_file("single-target", ">t1\nACGT\n");
-    let output = run(&[
-        "semiglobal-linear",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["query_id"], "q1");
-    assert_eq!(json["target_id"], "t1");
-    assert_eq!(json["verification_status"], "full");
-}
-
-#[test]
-fn wrapped_multi_record_fasta_pairwise_jsonl_works() {
-    let query = temp_file("wrapped-query", ">q1\nAC\nGT\n>q2\nAA\nAA\n");
-    let target = temp_file("wrapped-target", ">t1\nACGT\n>t2\nTTTT\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--verify",
-        "--format",
-        "jsonl",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let rows: Vec<Value> = stdout(&output)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("valid jsonl"))
-        .collect();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["pair_index"], 0);
-    assert_eq!(rows[0]["query_id"], "q1");
-    assert_eq!(rows[0]["target_id"], "t1");
-    assert_eq!(rows[0]["distance"], 0);
-    assert_eq!(rows[1]["pair_index"], 1);
-    assert_eq!(rows[1]["distance"], 4);
-}
-
-#[test]
-fn multi_record_fastq_pairwise_cigar_works() {
-    let query = temp_file("fastq-query", "@q1\nAC\n+\n!!\n@q2\nAA\n+\n!!\n");
-    let target = temp_file("fastq-target", "@t1\nAC\n+\n!!\n@t2\nAT\n+\n!!\n");
-    let output = run(&[
-        "global-linear",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--match",
-        "1",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-1",
-        "--format",
-        "cigar",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let text = stdout(&output);
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), 3);
-    assert!(lines[0].contains("pair_index\tquery_id\ttarget_id"));
-    assert!(lines[1].contains("\tq1\tt1\t"));
-    assert!(lines[2].contains("\tq2\tt2\t"));
-}
-
-#[test]
-fn tsv_output_has_stable_header_and_alignment_strings_can_be_requested() {
-    let output = run(&[
-        "local-linear",
-        "--query",
-        "ACACACTA",
-        "--target",
-        "AGCACACA",
-        "--match",
-        "2",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-2",
-        "--show-alignment",
-        "--format",
-        "tsv",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let text = stdout(&output);
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), 2);
-    assert!(lines[0].starts_with("pair_index\tquery_id\ttarget_id"));
-
-    let json = run(&[
-        "local-linear",
-        "--query",
-        "ACACACTA",
-        "--target",
-        "AGCACACA",
-        "--show-alignment",
-        "--format",
-        "json",
-    ]);
-    assert!(json.status.success(), "{}", stderr(&json));
-    let parsed: Value = serde_json::from_str(&stdout(&json)).expect("valid json");
-    assert!(parsed["aligned_query"]
-        .as_str()
-        .is_some_and(|s| !s.is_empty()));
-    assert!(parsed["aligned_target"]
-        .as_str()
-        .is_some_and(|s| !s.is_empty()));
-}
-
-#[test]
-fn mismatched_record_counts_fail() {
-    let query = temp_file("mismatch-query", ">q1\nAC\n>q2\nGT\n");
-    let target = temp_file("mismatch-target", ">t1\nAC\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("equal record counts"));
-}
-
-#[test]
-fn verify_limit_can_report_path_only() {
-    let output = run(&[
-        "global-linear",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--verify",
-        "--verify-limit",
-        "1",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["verification_status"], "path_only");
-    assert!(json["verified"].is_null());
-}
-
-#[test]
-fn operation_detail_controls_json_trace_size() {
-    let summary = run(&[
-        "edit-distance",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGA",
-        "--format",
-        "json",
-    ]);
-    assert!(summary.status.success(), "{}", stderr(&summary));
-    let summary_json: Value = serde_json::from_str(&stdout(&summary)).expect("valid json");
-    assert!(summary_json.get("operations").is_none());
-    assert_eq!(summary_json["operation_counts"][0]["op"], "match");
-
-    let none = run(&[
-        "edit-distance",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGA",
-        "--operation-detail",
-        "none",
-        "--format",
-        "json",
-    ]);
-    assert!(none.status.success(), "{}", stderr(&none));
-    let none_json: Value = serde_json::from_str(&stdout(&none)).expect("valid json");
-    assert!(none_json.get("operations").is_none());
-    assert!(none_json.get("operation_counts").is_none());
-
-    let full = run(&[
-        "edit-distance",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGA",
-        "--operation-detail",
-        "full",
-        "--format",
-        "json",
-    ]);
-    assert!(full.status.success(), "{}", stderr(&full));
-    let full_json: Value = serde_json::from_str(&stdout(&full)).expect("valid json");
-    assert_eq!(full_json["operations"].as_array().unwrap().len(), 4);
-    assert_eq!(full_json["operation_counts"].as_array().unwrap().len(), 2);
-}
-
-#[test]
-fn output_flag_writes_to_file() {
-    let output_path = temp_file("output-json", "");
-    let output = run(&[
+fn json_verify_checks_exact_optimality() {
+    let record = temp_file("record.json", "");
+    let solve = run(&[
+        "solve",
         "edit-distance",
         "--query",
         "kitten",
         "--target",
         "sitting",
-        "--verify",
         "--format",
         "json",
         "--output",
-        output_path.to_str().unwrap(),
+        record.to_str().unwrap(),
     ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "");
-    let parsed: Value =
-        serde_json::from_str(&fs::read_to_string(output_path).expect("output readable"))
-            .expect("valid json");
-    assert_eq!(parsed["distance"], 3);
-}
-
-#[test]
-fn certificate_output_hashes_trace_and_result() {
+    assert!(solve.status.success(), "{}", stderr(&solve));
     let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGA",
-        "--verify",
-        "--block-size",
-        "1",
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
         "--format",
         "json",
-        "--certificate",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    let certificate = &json["certificate"];
-    assert_eq!(certificate["version"], "hcp-align.certificate.v1");
-    assert_eq!(certificate["hash_algorithm"], "sha256");
-    assert_sha256(&certificate["query_sha256"]);
-    assert_sha256(&certificate["target_sha256"]);
-    assert_sha256(&certificate["parameters_sha256"]);
-    assert_sha256(&certificate["trace_sha256"]);
-    assert_sha256(&certificate["result_sha256"]);
-    assert_sha256(&certificate["certificate_sha256"]);
-}
-
-#[test]
-fn score_only_certificate_has_no_trace_hash() {
-    let output = run(&[
-        "edit-distance",
-        "--score-only",
         "--query",
         "kitten",
         "--target",
         "sitting",
-        "--verify",
-        "--format",
+        "--output-format",
         "json",
-        "--certificate",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    let certificate = &json["certificate"];
-    assert_eq!(json["backend"], "myers");
-    assert!(json["path_score"].is_null());
-    assert!(certificate["trace_sha256"].is_null());
-    assert_sha256(&certificate["query_sha256"]);
-    assert_sha256(&certificate["target_sha256"]);
-    assert_sha256(&certificate["parameters_sha256"]);
-    assert_sha256(&certificate["result_sha256"]);
-    assert_sha256(&certificate["certificate_sha256"]);
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["record_type"], "verification");
+    assert_eq!(value["verification"]["status"], "verified");
 }
 
 #[test]
-fn named_matrix_scores_protein_alignment() {
-    let output = run(&[
-        "global-linear",
+fn work_limit_is_exit_three_and_inconclusive() {
+    let record = temp_file("limited.json", "");
+    assert!(run(&[
+        "solve",
+        "edit-distance",
         "--query",
-        "W",
+        "kitten",
         "--target",
-        "W",
-        "--matrix",
-        "blosum62",
-        "--gap",
-        "-4",
-        "--verify",
+        "sitting",
         "--format",
         "json",
-        "--certificate",
+        "--output",
+        record.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    let output = run(&[
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
+        "--format",
+        "json",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--max-cells",
+        "1",
+        "--output-format",
+        "json",
     ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["score"], 11);
-    assert_eq!(json["path_score"], 11);
-    assert_eq!(json["verification_status"], "full");
-    assert_sha256(&json["certificate"]["parameters_sha256"]);
+    assert_eq!(output.status.code(), Some(3));
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["verification"]["status"], "inconclusive");
 }
 
 #[test]
-fn custom_matrix_file_scores_alignment() {
-    let matrix = temp_file(
-        "toy-matrix",
-        "
-          A C
-        A 2 3
-        C 3 2
-        ",
+fn mutated_objective_is_exit_one_with_specific_check() {
+    let original = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--format",
+        "json",
+    ]);
+    let mut value: Value = serde_json::from_str(&stdout(&original)).unwrap();
+    value["alignment"]["objective"]["value"] = Value::from(4);
+    let record = temp_file(
+        "mutated.json",
+        &serde_json::to_string_pretty(&value).unwrap(),
     );
     let output = run(&[
-        "global-linear",
-        "--query",
-        "A",
-        "--target",
-        "C",
-        "--matrix-file",
-        matrix.to_str().unwrap(),
-        "--gap",
-        "-5",
-        "--verify",
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
         "--format",
         "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["score"], 3);
-    assert_eq!(json["path_score"], 3);
-    assert_eq!(json["cigar"], "1X");
-}
-
-#[test]
-fn matrix_symbol_validation_reports_record_context() {
-    let output = run(&[
-        "global-linear",
-        "--query",
-        "J",
-        "--target",
-        "A",
-        "--matrix",
-        "blosum62",
-    ]);
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(err.contains("query query"), "{err}");
-    assert!(err.contains("BLOSUM62"), "{err}");
-    assert!(err.contains("symbol 'J'"), "{err}");
-}
-
-#[test]
-fn matrix_sources_are_mutually_exclusive() {
-    let matrix = temp_file("toy-matrix-conflict", "A\nA 1\n");
-    let output = run(&[
-        "global-linear",
-        "--query",
-        "A",
-        "--target",
-        "A",
-        "--matrix",
-        "blosum62",
-        "--matrix-file",
-        matrix.to_str().unwrap(),
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("provide either --matrix or --matrix-file"));
-}
-
-#[test]
-fn global_affine_wavefront_engine_returns_verified_path() {
-    let output = run(&[
-        "global-affine",
-        "--query",
-        "ACGTACGT",
-        "--target",
-        "ACGTTACGT",
-        "--engine",
-        "wavefront",
-        "--wavefront-band",
-        "2",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["score"], 12);
-    assert_eq!(json["path_score"], 12);
-    assert_eq!(json["verification_status"], "full");
-    assert_eq!(json["backend"], "wavefront-affine");
-    assert_eq!(json["block_size"], 0);
-}
-
-#[test]
-fn global_affine_auto_falls_back_when_wavefront_band_is_too_narrow() {
-    let output = run(&[
-        "global-affine",
-        "--query",
-        "AAAA",
-        "--target",
-        "AAAATTTT",
-        "--engine",
-        "auto",
-        "--wavefront-band",
-        "2",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["score"], 1);
-    assert_eq!(json["path_score"], 1);
-    assert_eq!(json["verification_status"], "full");
-    assert_eq!(json["backend"], "hcp-linear");
-    assert_eq!(json["block_size"], 1);
-}
-
-#[test]
-fn global_affine_wavefront_reports_too_narrow_band() {
-    let output = run(&[
-        "global-affine",
-        "--query",
-        "AAAA",
-        "--target",
-        "AAAATTTT",
-        "--engine",
-        "wavefront",
-        "--wavefront-band",
-        "2",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("did not find a path inside --wavefront-band 2"));
-}
-
-#[test]
-fn seeded_global_linear_aligns_exact_seed_window() {
-    let output = run(&[
-        "seeded-global-linear",
-        "--query",
-        "TTACGTAA",
-        "--target",
-        "GGACGTCC",
-        "--seed-k",
-        "2",
-        "--seed-window",
-        "2",
-        "--seed-flank",
-        "1",
-        "--match",
-        "2",
-        "--mismatch-penalty",
-        "1",
-        "--gap",
-        "-2",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["mode"], "seeded-global-linear");
-    assert_eq!(json["score"], 6);
-    assert_eq!(json["path_score"], 6);
-    assert_eq!(json["verification_status"], "full");
-    assert_eq!(json["query_start"], 1);
-    assert_eq!(json["query_end"], 7);
-    assert_eq!(json["target_start"], 1);
-    assert_eq!(json["target_end"], 7);
-    assert_eq!(json["cigar"], "1X4=1X");
-    assert_eq!(json["backend"], "minimizer-seeded");
-}
-
-#[test]
-fn seeded_global_linear_reports_missing_seed() {
-    let output = run(&[
-        "seeded-global-linear",
-        "--query",
-        "AAAA",
-        "--target",
-        "CCCC",
-        "--seed-k",
-        "2",
-        "--seed-window",
-        "2",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("no minimizer seed found"));
-}
-
-#[test]
-fn edit_distance_alternate_engines_return_verified_paths() {
-    let auto = run(&[
-        "edit-distance",
-        "--query",
-        "ACGTACGT",
-        "--target",
-        "ACGTTCGT",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(auto.status.success(), "{}", stderr(&auto));
-    let auto_json: Value = serde_json::from_str(&stdout(&auto)).expect("valid json");
-    assert_eq!(auto_json["distance"], 1);
-    assert_eq!(auto_json["path_score"], 1);
-    assert_eq!(auto_json["verification_status"], "full");
-    assert_eq!(auto_json["backend"], "adaptive-banded");
-    assert_eq!(auto_json["block_size"], 0);
-
-    let adaptive = run(&[
-        "edit-distance",
-        "--engine",
-        "adaptive-banded",
         "--query",
         "kitten",
         "--target",
         "sitting",
-        "--verify",
-        "--format",
+        "--output-format",
         "json",
-    ]);
-    assert!(adaptive.status.success(), "{}", stderr(&adaptive));
-    let adaptive_json: Value = serde_json::from_str(&stdout(&adaptive)).expect("valid json");
-    assert_eq!(adaptive_json["distance"], 3);
-    assert_eq!(adaptive_json["path_score"], 3);
-    assert_eq!(adaptive_json["verification_status"], "full");
-    assert_eq!(adaptive_json["backend"], "adaptive-banded");
-    assert_eq!(adaptive_json["block_size"], 0);
-
-    let hcp_linear = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp-linear",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(hcp_linear.status.success(), "{}", stderr(&hcp_linear));
-    let hcp_linear_json: Value = serde_json::from_str(&stdout(&hcp_linear)).expect("valid json");
-    assert_eq!(hcp_linear_json["distance"], 3);
-    assert_eq!(hcp_linear_json["path_score"], 3);
-    assert_eq!(hcp_linear_json["verification_status"], "full");
-    assert_eq!(hcp_linear_json["backend"], "hcp-linear");
-    assert_eq!(hcp_linear_json["block_size"], 1);
-}
-
-#[test]
-fn edit_distance_score_only_uses_myers_without_traceback() {
-    let output = run(&[
-        "edit-distance",
-        "--score-only",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-        "--verify",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["distance"], 3);
-    assert!(json["path_score"].is_null());
-    assert_eq!(json["verification_status"], "full");
-    assert_eq!(json["verified"], true);
-    assert_eq!(json["backend"], "myers");
-    assert_eq!(json["block_size"], 0);
-    assert_eq!(json["path_length"], 0);
-    assert_eq!(json["cigar"], "");
-    assert!(json.get("operation_counts").is_none());
-    assert!(json.get("operations").is_none());
-}
-
-#[test]
-fn edit_distance_score_only_reports_score_only_when_full_verify_is_skipped() {
-    let output = run(&[
-        "edit-distance",
-        "--score-only",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-        "--verify",
-        "--verify-limit",
-        "1",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let json: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(json["distance"], 3);
-    assert!(json["path_score"].is_null());
-    assert_eq!(json["verification_status"], "score_only");
-    assert!(json["verified"].is_null());
-    assert_eq!(json["backend"], "myers");
-}
-
-#[test]
-fn edit_distance_myers_requires_score_only() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "myers",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("score-only"));
-}
-
-#[test]
-fn adaptive_banded_engine_rejects_block_size_override() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "adaptive-banded",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-        "--block-size",
-        "1",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("--block-size applies only to HCP"));
-}
-
-#[test]
-fn auto_engine_rejects_block_size_override() {
-    let output = run(&[
-        "edit-distance",
-        "--query",
-        "kitten",
-        "--target",
-        "sitting",
-        "--block-size",
-        "1",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("--block-size requires an explicit HCP"));
-}
-
-#[test]
-fn continue_on_error_emits_failed_batch_records() {
-    let query = temp_file("continue-query", ">q1\nAC\n>q2\nAA\n");
-    let target = temp_file("continue-target", ">t1\nAC\n>t2\nAT\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--engine",
-        "hcp",
-        "--block-size",
-        "0",
-        "--continue-on-error",
-        "--format",
-        "jsonl",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let rows: Vec<Value> = stdout(&output)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("valid jsonl"))
-        .collect();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["verification_status"], "failed");
-    assert!(rows[0]["error"]
-        .as_str()
-        .is_some_and(|err| err.contains("block size")));
-}
-
-#[test]
-fn progress_always_writes_to_stderr() {
-    let query = temp_file("progress-query", ">q1\nAC\n>q2\nAA\n");
-    let target = temp_file("progress-target", ">t1\nAC\n>t2\nAT\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--progress",
-        "always",
-        "--format",
-        "jsonl",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stderr(&output).contains("hcp-align: 2/2"));
-}
-
-#[test]
-fn threads_one_works_without_parallel_feature() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--threads",
-        "1",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-}
-
-#[cfg(not(feature = "parallel"))]
-#[test]
-fn threads_above_one_requires_parallel_feature() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--threads",
-        "2",
-        "--format",
-        "json",
-    ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("parallel"));
-}
-
-#[cfg(feature = "parallel")]
-#[test]
-fn threads_above_one_works_with_parallel_feature() {
-    let query = temp_file("threads-query", ">q1\nAC\n>q2\nAA\n");
-    let target = temp_file("threads-target", ">t1\nAC\n>t2\nAT\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--threads",
-        "2",
-        "--format",
-        "jsonl",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output).lines().count(), 2);
-}
-
-#[test]
-fn json_output_has_stable_golden_contract() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--verify",
-        "--block-size",
-        "1",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let parsed: Value = serde_json::from_str(&stdout(&output)).expect("valid json");
-    assert_eq!(
-        with_normalized_timings(parsed),
-        json!({
-            "schema_version": "hcp-align.v1",
-            "engine": "hcp-dp",
-            "pair_index": 0,
-            "query_id": "query",
-            "target_id": "target",
-            "mode": "edit-distance",
-            "score": null,
-            "distance": 0,
-            "path_score": 0,
-            "verification_status": "full",
-            "verified": true,
-            "query_start": 0,
-            "query_end": 4,
-            "target_start": 0,
-            "target_end": 4,
-            "cigar": "4=",
-            "operation_counts": [
-                {"op": "match", "count": 4}
-            ],
-            "block_size": 1,
-            "path_length": 5,
-            "summary_build_ms": "<summary_build_ms>",
-            "reconstruction_ms": "<reconstruction_ms>",
-            "verification_ms": "<verification_ms>",
-            "elapsed_ms": "<elapsed_ms>"
-        })
-    );
-}
-
-#[test]
-fn jsonl_output_has_stable_batch_golden_contract() {
-    let query = temp_file("golden-jsonl-query", ">q1\nAC\n>q2\nAA\n");
-    let target = temp_file("golden-jsonl-target", ">t1\nAC\n>t2\nAT\n");
-    let output = run(&[
-        "edit-distance",
-        "--query-file",
-        query.to_str().unwrap(),
-        "--target-file",
-        target.to_str().unwrap(),
-        "--engine",
-        "hcp",
-        "--verify",
-        "--block-size",
-        "1",
-        "--format",
-        "jsonl",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let rows: Vec<Value> = stdout(&output)
-        .lines()
-        .map(|line| with_normalized_timings(serde_json::from_str(line).expect("valid jsonl")))
-        .collect();
-    assert_eq!(
-        rows,
-        json!([
-            {
-                "schema_version": "hcp-align.v1",
-                "engine": "hcp-dp",
-                "pair_index": 0,
-                "query_id": "q1",
-                "target_id": "t1",
-                "mode": "edit-distance",
-                "score": null,
-                "distance": 0,
-                "path_score": 0,
-                "verification_status": "full",
-                "verified": true,
-                "query_start": 0,
-                "query_end": 2,
-                "target_start": 0,
-                "target_end": 2,
-                "cigar": "2=",
-                "operation_counts": [
-                    {"op": "match", "count": 2}
-                ],
-                "block_size": 1,
-                "path_length": 3,
-                "summary_build_ms": "<summary_build_ms>",
-                "reconstruction_ms": "<reconstruction_ms>",
-                "verification_ms": "<verification_ms>",
-                "elapsed_ms": "<elapsed_ms>"
-            },
-            {
-                "schema_version": "hcp-align.v1",
-                "engine": "hcp-dp",
-                "pair_index": 1,
-                "query_id": "q2",
-                "target_id": "t2",
-                "mode": "edit-distance",
-                "score": null,
-                "distance": 1,
-                "path_score": 1,
-                "verification_status": "full",
-                "verified": true,
-                "query_start": 0,
-                "query_end": 2,
-                "target_start": 0,
-                "target_end": 2,
-                "cigar": "1=1X",
-                "operation_counts": [
-                    {"op": "match", "count": 1},
-                    {"op": "mismatch", "count": 1}
-                ],
-                "block_size": 1,
-                "path_length": 3,
-                "summary_build_ms": "<summary_build_ms>",
-                "reconstruction_ms": "<reconstruction_ms>",
-                "verification_ms": "<verification_ms>",
-                "elapsed_ms": "<elapsed_ms>"
-            }
-        ])
+    let report: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(report["verification"]["status"], "invalid");
+    assert!(report["verification"]["checks"]
         .as_array()
-        .expect("expected golden array")
-        .clone()
-    );
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "realized_objective" && check["passed"] == false));
 }
 
 #[test]
-fn tsv_and_cigar_outputs_have_stable_golden_contracts() {
-    let tsv = run(&[
+fn paf_round_trip_verifies() {
+    let paf = temp_file("record.paf", "");
+    assert!(run(&[
+        "solve",
         "edit-distance",
-        "--engine",
-        "hcp",
         "--query",
-        "ACGT",
+        "kitten",
         "--target",
-        "ACGT",
-        "--verify",
-        "--block-size",
-        "1",
-        "--format",
-        "tsv",
-    ]);
-    assert!(tsv.status.success(), "{}", stderr(&tsv));
-    assert_eq!(
-        normalize_tsv_timings(&stdout(&tsv)),
-        "pair_index\tquery_id\ttarget_id\tmode\tscore\tdistance\tpath_score\tverification_status\tquery_start\tquery_end\ttarget_start\ttarget_end\tcigar\tblock_size\tpath_length\tsummary_build_ms\treconstruction_ms\tverification_ms\telapsed_ms\n0\tquery\ttarget\tedit-distance\t\t0\t0\tfull\t0\t4\t0\t4\t4=\t1\t5\t<summary_build_ms>\t<reconstruction_ms>\t<verification_ms>\t<elapsed_ms>"
-    );
-
-    let cigar = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--verify",
-        "--block-size",
-        "1",
-        "--format",
-        "cigar",
-    ]);
-    assert!(cigar.status.success(), "{}", stderr(&cigar));
-    assert_eq!(
-        stdout(&cigar).trim_end(),
-        "pair_index\tquery_id\ttarget_id\tmode\tscore\tdistance\tpath_score\tverification_status\tquery_start\tquery_end\ttarget_start\ttarget_end\tcigar\n0\tquery\ttarget\tedit-distance\t\t0\t0\tfull\t0\t4\t0\t4\t4="
-    );
-}
-
-#[test]
-fn paf_output_has_stable_golden_contract() {
-    let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGT",
-        "--verify",
-        "--block-size",
-        "1",
+        "sitting",
         "--format",
         "paf",
+        "--output",
+        paf.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    let output = run(&[
+        "verify",
+        "--alignment",
+        paf.to_str().unwrap(),
+        "--format",
+        "paf",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--mode",
+        "edit-distance",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim_end(),
-        "query\t4\t0\t4\t+\ttarget\t4\t0\t4\t4\t4\t255\tNM:i:0\tcg:Z:4=\tvs:Z:full\tpi:i:0"
-    );
+    assert!(stdout(&output).contains("Verified"));
 }
 
 #[test]
-fn paf_cigar_uses_reference_oriented_indel_symbols() {
-    let output = run(&[
+fn sam_round_trip_verifies() {
+    let sam = temp_file("record.sam", "");
+    assert!(run(&[
+        "solve",
         "edit-distance",
-        "--engine",
-        "hcp",
         "--query",
-        "AC",
+        "kitten",
+        "--target",
+        "sitting",
+        "--format",
+        "sam",
+        "--output",
+        sam.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    let output = run(&[
+        "verify",
+        "--alignment",
+        sam.to_str().unwrap(),
+        "--format",
+        "sam",
+        "--query",
+        "kitten",
+        "--target",
+        "sitting",
+        "--mode",
+        "edit-distance",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn external_sam_m_is_expanded_against_sources() {
+    let sam = temp_file(
+        "external.sam",
+        "@HD\tVN:1.6\n@SQ\tSN:target\tLN:4\nquery\t0\ttarget\t1\t255\t4M\t*\t0\t0\tACGT\t*\tNM:i:0\n",
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        sam.to_str().unwrap(),
+        "--format",
+        "sam",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--mode",
+        "edit-distance",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn paf_requires_explicit_problem() {
+    let paf = temp_file(
+        "missing-mode.paf",
+        "query\t1\t0\t1\t+\ttarget\t1\t0\t1\t1\t1\t255\tcg:Z:1=\tNM:i:0\n",
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        paf.to_str().unwrap(),
+        "--format",
+        "paf",
+        "--query",
+        "A",
         "--target",
         "A",
-        "--block-size",
-        "1",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("required for PAF"));
+
+    let output = run(&[
+        "verify",
+        "--alignment",
+        paf.to_str().unwrap(),
         "--format",
         "paf",
+        "--query",
+        "A",
+        "--target",
+        "A",
+        "--mode",
+        "global-linear",
+        "--gap",
+        "-2",
     ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim_end(),
-        "query\t2\t0\t2\t+\ttarget\t1\t0\t1\t1\t2\t255\tNM:i:1\tcg:Z:1=1I\tvs:Z:path_only\tpi:i:0"
-    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--match is required"));
 }
 
 #[test]
-fn paf_rejects_score_only_records() {
-    let output = run(&[
+fn compare_accepts_equivalent_records() {
+    let record = temp_file("compare.json", "");
+    assert!(run(&[
+        "solve",
         "edit-distance",
-        "--score-only",
+        "--query",
+        "AA",
+        "--target",
+        "A",
+        "--format",
+        "json",
+        "--output",
+        record.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    let output = run(&[
+        "compare",
+        "--left",
+        record.to_str().unwrap(),
+        "--left-format",
+        "json",
+        "--right",
+        record.to_str().unwrap(),
+        "--right-format",
+        "json",
+        "--query",
+        "AA",
+        "--target",
+        "A",
+        "--output-format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["equivalent"], true);
+    assert_eq!(value["inputs"]["query"], "AA");
+    assert_eq!(value["inputs"]["target"], "A");
+    assert!(value["left"].get("metrics").is_none());
+}
+
+#[test]
+fn integrity_mutation_is_a_named_invalid_check() {
+    let solved = run(&[
+        "solve",
+        "edit-distance",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--integrity",
+        "--format",
+        "json",
+    ]);
+    let mut value: Value = serde_json::from_str(&stdout(&solved)).unwrap();
+    value["producer"]["backend"] = Value::from("tampered");
+    let record = temp_file(
+        "tampered-integrity.json",
+        &serde_json::to_string(&value).unwrap(),
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
+        "--format",
+        "json",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGT",
+        "--output-format",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert!(report["verification"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "integrity_fingerprint" && check["passed"] == false));
+}
+
+#[test]
+fn paf_rejects_corrupt_match_count_and_nm_tag() {
+    let solved = run(&[
+        "solve",
+        "edit-distance",
         "--query",
         "ACGT",
         "--target",
@@ -1117,91 +496,202 @@ fn paf_rejects_score_only_records() {
         "--format",
         "paf",
     ]);
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("PAF output requires traceback"));
+    assert!(solved.status.success());
+    let line = stdout(&solved);
+    let mut fields: Vec<String> = line.trim().split('\t').map(str::to_string).collect();
+    fields[9] = "4".to_string();
+    let bad_matches = temp_file("bad-matches.paf", &(fields.join("\t") + "\n"));
+    let output = run(&[
+        "verify",
+        "--alignment",
+        bad_matches.to_str().unwrap(),
+        "--format",
+        "paf",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--mode",
+        "edit-distance",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("matching bases"));
+
+    let mut fields: Vec<String> = line.trim().split('\t').map(str::to_string).collect();
+    let nm = fields
+        .iter()
+        .position(|field| field.starts_with("NM:i:"))
+        .unwrap();
+    fields[nm] = "NM:i:2".to_string();
+    let bad_nm = temp_file("bad-nm.paf", &(fields.join("\t") + "\n"));
+    let output = run(&[
+        "verify",
+        "--alignment",
+        bad_nm.to_str().unwrap(),
+        "--format",
+        "paf",
+        "--query",
+        "ACGT",
+        "--target",
+        "ACGA",
+        "--mode",
+        "edit-distance",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("NM:i:2"));
 }
 
 #[test]
-fn sam_output_has_stable_golden_contract() {
+fn sam_validates_sequence_and_soft_clipping() {
+    let mismatched = temp_file(
+        "bad-seq.sam",
+        "@SQ\tSN:target\tLN:4\nquery\t0\ttarget\t1\t255\t4=\t*\t0\t0\tTGCA\t*\tNM:i:0\n",
+    );
     let output = run(&[
-        "edit-distance",
-        "--engine",
-        "hcp",
+        "verify",
+        "--alignment",
+        mismatched.to_str().unwrap(),
+        "--format",
+        "sam",
         "--query",
         "ACGT",
         "--target",
         "ACGT",
-        "--verify",
-        "--block-size",
-        "1",
-        "--format",
-        "sam",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim_end(),
-        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:4\nquery\t0\ttarget\t1\t255\t4=\t*\t0\t0\tACGT\t*\tNM:i:0\tVS:Z:full\tPI:i:0"
-    );
-}
-
-#[test]
-fn sam_cigar_uses_reference_oriented_indel_symbols() {
-    let output = run(&[
+        "--mode",
         "edit-distance",
-        "--engine",
-        "hcp",
-        "--query",
-        "AC",
-        "--target",
-        "A",
-        "--block-size",
-        "1",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("SEQ does not match"));
+
+    let clipped = temp_file(
+        "soft-clipped.sam",
+        "@SQ\tSN:target\tLN:4\nquery\t0\ttarget\t1\t255\t1S4=1S\t*\t0\t0\tTACGTG\t*\tAS:i:8\tNM:i:0\n",
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        clipped.to_str().unwrap(),
         "--format",
         "sam",
-    ]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim_end(),
-        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:1\nquery\t0\ttarget\t1\t255\t1=1I\t*\t0\t0\tAC\t*\tNM:i:1\tVS:Z:path_only\tPI:i:0"
-    );
-}
-
-#[test]
-fn sam_cigar_soft_clips_unaligned_query_bases() {
-    let output = run(&[
+        "--query",
+        "TACGTG",
+        "--target",
+        "ACGT",
+        "--mode",
         "local-linear",
-        "--query",
-        "TTAC",
-        "--target",
-        "AC",
         "--match",
         "2",
         "--mismatch-penalty",
         "1",
         "--gap",
         "-2",
-        "--format",
-        "sam",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim_end(),
-        "@HD\tVN:1.6\tSO:unknown\n@SQ\tSN:target\tLN:2\nquery\t0\ttarget\t1\t255\t2S2=\t*\t0\t0\tTTAC\t*\tAS:i:4\tNM:i:0\tVS:Z:path_only\tPI:i:0"
-    );
 }
 
 #[test]
-fn sam_rejects_score_only_records() {
+fn duplicate_and_missing_source_ids_are_errors() {
+    let queries = temp_file("duplicate.fa", ">q\nA\n>q\nA\n");
+    let targets = temp_file("targets.fa", ">t1\nA\n>t2\nA\n");
+    let record = temp_file("empty.json", "[]\n");
     let output = run(&[
-        "edit-distance",
-        "--score-only",
-        "--query",
-        "ACGT",
-        "--target",
-        "ACGA",
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
+        "--format",
+        "json",
+        "--query-file",
+        queries.to_str().unwrap(),
+        "--target-file",
+        targets.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("duplicate query id 'q'"));
+
+    let sam = temp_file(
+        "missing-id.sam",
+        "other\t0\ttarget\t1\t255\t1=\t*\t0\t0\tA\t*\tNM:i:0\n",
+    );
+    let output = run(&[
+        "verify",
+        "--alignment",
+        sam.to_str().unwrap(),
         "--format",
         "sam",
+        "--query",
+        "A",
+        "--target",
+        "A",
+        "--mode",
+        "edit-distance",
     ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("query id 'other' is missing"));
+}
+
+#[test]
+fn verification_source_collections_do_not_require_positional_pairing() {
+    let solve_queries = temp_file("one-query.fa", ">q\nACGT\n");
+    let solve_targets = temp_file("one-target.fa", ">t\nACGT\n");
+    let record = temp_file("id-record.json", "");
+    let solved = run(&[
+        "solve",
+        "edit-distance",
+        "--query-file",
+        solve_queries.to_str().unwrap(),
+        "--target-file",
+        solve_targets.to_str().unwrap(),
+        "--format",
+        "json",
+        "--output",
+        record.to_str().unwrap(),
+    ]);
+    assert!(solved.status.success(), "{}", stderr(&solved));
+
+    let verification_targets = temp_file("reference-set.fa", ">unused\nTTTT\n>t\nACGT\n");
+    let output = run(&[
+        "verify",
+        "--alignment",
+        record.to_str().unwrap(),
+        "--format",
+        "json",
+        "--query-file",
+        solve_queries.to_str().unwrap(),
+        "--target-file",
+        verification_targets.to_str().unwrap(),
+        "--output-format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn fasta_batch_emits_jsonl() {
+    let queries = temp_file("queries.fa", ">q1\nACGT\n>q2\nAAAA\n");
+    let targets = temp_file("targets.fa", ">t1\nACGT\n>t2\nTTTT\n");
+    let output = run(&[
+        "solve",
+        "edit-distance",
+        "--query-file",
+        queries.to_str().unwrap(),
+        "--target-file",
+        targets.to_str().unwrap(),
+        "--format",
+        "jsonl",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rows: Vec<Value> = stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["pair"]["query"]["id"], "q1");
+    assert_eq!(rows[1]["alignment"]["objective"]["value"], 4);
+}
+
+#[test]
+fn legacy_top_level_mode_is_rejected() {
+    let output = run(&["edit-distance", "--query", "A", "--target", "A"]);
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("SAM output requires traceback"));
+    assert!(stderr(&output).contains("unrecognized subcommand"));
 }

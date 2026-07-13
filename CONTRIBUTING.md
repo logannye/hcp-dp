@@ -18,29 +18,32 @@ Useful focused checks:
 cargo test --lib --tests
 cargo test --features tracing --lib --tests
 cargo test --features parallel --lib --tests
+cargo test --features experimental-hcp --lib --tests
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo run --bin scale_probe -- --format table --verify-limit 512
-cargo run --bin hcp-align -- edit-distance --query kitten --target sitting --verify
+cargo run --bin hcp-align -- solve edit-distance --query kitten --target sitting --cross-check
+cargo run --bin hcp-align -- verify --alignment result.json --format json --query kitten --target sitting
 python3 scripts/validate_external.py
-python3 scripts/perf_report.py --scenario edit_distance
+cargo bench --bench oracle_perf
+python3 scripts/perf_report.py
 ```
 
 Coverage in CI uses `cargo-llvm-cov`.
 External validation skips missing Parasail/Edlib packages by default; pass
 `--required` only in an environment where those packages are installed.
 
-## Problem Admission Rule
+## Capability Admission Rule
 
-Do not export a new `problems::*` module until tests prove:
+Do not add a mode, format, backend, or binding unless it directly improves
+`solve`, `verify`, or `compare`, or responds to validated external demand.
+Every alignment backend must prove:
 
-- summary apply equals direct recurrence replay,
-- merged summaries equal the direct combined interval,
-- split boundaries are endpoint-constrained and feasible,
-- reconstructed segments join exactly,
-- path-realized objective equals reported objective.
+- path-realized objective equals the reported objective,
+- its objective agrees with the independent reference scorer,
+- its canonical CIGAR round-trips through applicable formats,
+- ambiguous optimal tracebacks are compared by objective equivalence.
 
-If the proof is incomplete, keep the module private or behind an experimental
-feature.
+Generic DP authoring APIs remain under `experimental-hcp` and have no stability
+guarantee.
 
 ## Documentation Standards
 

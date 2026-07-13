@@ -1,6 +1,6 @@
 use crate::engine::HcpEngine;
+use crate::traits::HcpProblem;
 use crate::utils::default_block_size;
-use crate::HcpProblem;
 
 /// Builder for configuring an [`HcpEngine`] before execution.
 ///

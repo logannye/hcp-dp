@@ -5,6 +5,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build-binary:
@@ -30,13 +33,26 @@ jobs:
       - name: Smoke test binary
         shell: bash
         run: target/release/${{ matrix.binary }} --help
-      - name: Package binary
+      - name: Stage binary
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "target/alpha/${{ matrix.artifact }}"
           cp "target/release/${{ matrix.binary }}" "target/alpha/${{ matrix.artifact }}/"
-          cp README.md LICENSE "target/alpha/${{ matrix.artifact }}/"
+          cp README.md LICENSE schemas/hcp-align.v2.schema.json docs/migration-v2.md "target/alpha/${{ matrix.artifact }}/"
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/alpha/${{ matrix.artifact }}
+          format: spdx-json
+          output-file: target/alpha/${{ matrix.artifact }}/sbom.spdx.json
+          artifact-name: ${{ matrix.artifact }}-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euo pipefail
           (cd target/alpha && tar -czf "${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}")
           python - <<'PY'
           import hashlib
@@ -45,6 +61,15 @@ jobs:
           digest = hashlib.sha256(path.read_bytes()).hexdigest()
           path.with_suffix(path.suffix + ".sha256").write_bytes(f"{digest}  {path.name}\n".encode("utf-8"))
           PY
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: target/alpha/${{ matrix.artifact }}.tar.gz
+      - name: Attest SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: target/alpha/${{ matrix.artifact }}.tar.gz
+          sbom-path: target/alpha/${{ matrix.artifact }}/sbom.spdx.json
       - name: Upload binary artifact
         uses: actions/upload-artifact@v6
         with:
@@ -65,7 +90,10 @@ jobs:
       - name: Install external validators
         run: python -m pip install parasail edlib
       - name: Generate release report
-        run: python scripts/perf_report.py --external-required --verify-limit 512
+        run: |
+          python scripts/validate_external.py --required
+          cargo bench --bench oracle_perf
+          python scripts/perf_report.py
       - name: Upload report artifact
         uses: actions/upload-artifact@v6
         with:

@@ -22,6 +22,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Require a verified signed annotated tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/check_release_tag.py \
+            --tag "${GITHUB_REF_NAME}" \
+            --expected-commit "$(git rev-parse HEAD)"
       - name: Validate tag and package versions
         run: python scripts/check_release_versions.py --tag "${GITHUB_REF_NAME}"
       - name: Enforce stable-release adoption and scheduled performance history

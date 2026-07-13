@@ -646,7 +646,7 @@ pub fn solve(request: SolveRequest) -> Result<AlignmentRecord, String> {
         record_type: "alignment".to_string(),
         producer: Producer {
             name: "hcp-align".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: crate::VERSION.to_string(),
             commit: option_env!("HCP_DP_GIT_COMMIT").map(str::to_string),
             backend,
         },
@@ -2250,6 +2250,8 @@ mod tests {
     #[test]
     fn solve_and_verify_edit_distance() {
         let record = solve(request(AlignmentMode::EditDistance, b"kitten", b"sitting")).unwrap();
+        assert_eq!(record.producer.name, "hcp-align");
+        assert_eq!(record.producer.version, crate::VERSION);
         assert_eq!(record.alignment.objective.value, 3);
         let report = verify(VerificationRequest {
             record,

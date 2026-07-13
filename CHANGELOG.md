@@ -23,7 +23,10 @@ the alpha release when they improve correctness or clarity.
 - Added platform-wheel Python packaging with generator-style solve, verify,
   and compare APIs and strict binary/package version matching.
 
-## 0.2.0-alpha.1 - 2026-07-12
+## 0.2.0-alpha.1 - 2026-07-12 (unpublished)
+
+This implementation checkpoint was superseded by `0.2.0-alpha.2` before any
+tag or package was published.
 
 - Reframed `hcp-align` as an exact alignment reference generator, verifier, and
   backend comparison tool.

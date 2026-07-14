@@ -18,5 +18,7 @@ workflow validates this evidence and refuses the stable release until three
 distinct pilots have public HTTPS evidence.
 
 Use [`docs/pilot-guide.md`](../docs/pilot-guide.md) for the execution and
-privacy contract. The prepared outreach shortlist and drafts live in
-`pilot-outreach.md`; no message may be sent without explicit owner approval.
+privacy contract. The approved outreach ledger, public invitation links, and
+original drafts live in [`pilot-outreach.md`](pilot-outreach.md). Invitations
+are not release evidence until the corresponding pilot meets the documented
+threshold.

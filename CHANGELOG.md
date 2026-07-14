@@ -16,8 +16,9 @@ Target: `0.2.0-rc.1` after four consecutive scheduled RSS and Criterion runs.
   final 1 MiB, including large-output, failure, early-close, and cleanup tests.
 - Added enforced release Criterion reports in JSON and Markdown and pinned
   Edlib 1.3.9.post1/Parasail 1.3.4 validation evidence.
-- Added a pilot guide, evidence issue template, approval-gated outreach drafts,
-  and explicit labels for record and backend-disagreement reports.
+- Added a pilot guide, evidence issue template, approval-gated outreach ledger,
+  five public pilot invitations, and explicit labels for record and
+  backend-disagreement reports.
 - Added release guards requiring four scheduled RSS/performance successes for
   the RC and seven days without an open release blocker before stable v0.2.0.
 

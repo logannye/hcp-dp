@@ -59,7 +59,8 @@ represented by a reviewed allowlist entry.
 Status: publishing automation, both trusted publishers, release environments,
 branch protection, alpha artifact validation, and the initial crates.io
 publication are complete. Scheduled history, RC observation, and adoption
-evidence remain.
+evidence remain. Five approved pilot invitations were opened on 2026-07-14;
+the adoption count remains 0/3 until public completion evidence is available.
 
 - Dry-run workflow builds and smoke-tests Linux x86_64/aarch64, macOS
   x86_64/arm64, and Windows x86_64 archives and platform wheels.

@@ -1,8 +1,20 @@
-# Pilot outreach shortlist and drafts
+# Pilot outreach ledger and drafts
 
-Prepared on 2026-07-13. This is an approval-ready shortlist, not a record of
-messages sent. Do not contact anyone until the repository owner explicitly
-approves outreach.
+Prepared on 2026-07-13 and approved by the repository owner on 2026-07-14.
+Five invitations were sent through public issues in this repository so the
+request, response, and any resulting evidence remain auditable. An invitation
+does not count toward the adoption gate until its pilot satisfies
+[`docs/pilot-guide.md`](../docs/pilot-guide.md).
+
+## Outreach status
+
+| Target | Contact | Invitation | Status |
+| --- | --- | --- | --- |
+| WFA2-lib | `@smarco` | [#5](https://github.com/logannye/hcp-dp/issues/5) | Awaiting response |
+| Rust-Bio | `@johanneskoester` | [#6](https://github.com/logannye/hcp-dp/issues/6) | Awaiting response |
+| Edlib | `@Martinsos` | [#7](https://github.com/logannye/hcp-dp/issues/7) | Awaiting response |
+| Parasail | `@jeffdaily` | [#8](https://github.com/logannye/hcp-dp/issues/8) | Awaiting response |
+| nf-core Bowtie2 | `@joseespinosa`, `@drpatelh` | [#9](https://github.com/logannye/hcp-dp/issues/9) | Awaiting response |
 
 ## Shortlist
 
@@ -19,8 +31,8 @@ approves outreach.
    operational batch behavior.
 
 GitHub issues or project-listed maintainer channels are preferred over personal
-email. Open-source project issue policies must be checked immediately before
-contact.
+email. The upstream projects' current issue/contact policies were checked
+immediately before these invitations were opened.
 
 ## Shared pilot offer
 

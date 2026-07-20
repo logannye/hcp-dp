@@ -30,13 +30,14 @@ evidence continues to accumulate for the RC/stable gates.
   at most 16 MiB growth, 128 MiB absolute RSS, and 15% over the checked Linux
   baseline.
 
-Gate: four consecutive scheduled RSS/performance runs must pass before final
-`0.2.0`. The generator and fixtures are ephemeral, not stored in Git.
+Gate: four consecutive daily scheduled RSS/performance runs must pass before
+final `0.2.0`; manual dispatches never count. The generator and fixtures are
+ephemeral, not stored in Git.
 
 ## `0.2.0-rc.1`: differential tooling
 
 Status: implementation and hardening complete; the tag remains blocked until
-four consecutive scheduled RSS and Criterion runs pass.
+four consecutive daily scheduled RSS and Criterion runs pass.
 
 - Standalone Rust-Bio 4.0.1 adapter for all five modes, including affine gap
   convention translation.
@@ -76,11 +77,11 @@ the adoption count remains 0/3 until public completion evidence is available.
   bundled-binary version.
 
 Gate: protected `release` and `pypi` environments, required branch checks, four
-scheduled performance passes, no untriaged discrepancies, clean install smoke
-tests, and three external users independently validating records or reproducing
-an alignment bug. Stable also requires seven days of RC observation without an
-open `release-blocker`. Automation must not create the final tag before the
-adoption gate is documented.
+daily scheduled performance passes, no untriaged discrepancies, clean install
+smoke tests, and three external users independently validating records or
+reproducing an alignment bug. Stable also requires seven days of RC observation
+without an open `release-blocker`. Automation must not create the final tag
+before the adoption gate is documented.
 
 ## Experimental HCP SDK
 

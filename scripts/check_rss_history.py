@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require four scheduled RSS and performance successes for RC/stable tags."""
+"""Require four daily scheduled RSS and performance successes for RC/stable tags."""
 
 from __future__ import annotations
 
@@ -36,15 +36,15 @@ def main() -> int:
             runs = json.load(response).get("workflow_runs", [])
         if len(runs) < 4:
             raise SystemExit(
-                f"{args.tag} requires four scheduled {workflow} runs; found {len(runs)}"
+                f"{args.tag} requires four daily scheduled {workflow} runs; found {len(runs)}"
             )
         failures = [run for run in runs if run.get("conclusion") != "success"]
         if failures:
             identifiers = ", ".join(str(run.get("id")) for run in failures)
             raise SystemExit(
-                f"the latest four scheduled {workflow} runs are not all successful: {identifiers}"
+                f"the latest four daily scheduled {workflow} runs are not all successful: {identifiers}"
             )
-        print(f"latest four completed scheduled {workflow} runs all succeeded")
+        print(f"latest four completed daily scheduled {workflow} runs all succeeded")
     return 0
 
 

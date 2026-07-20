@@ -2,7 +2,9 @@ name: Nightly Perf
 
 on:
   schedule:
-    - cron: "0 5 * * 1"
+    # Daily at an off-peak minute so four independent hosted observations can
+    # accumulate without waiting four calendar weeks.
+    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
       enforce:

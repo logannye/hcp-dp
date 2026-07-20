@@ -7,7 +7,8 @@ the alpha release when they improve correctness or clarity.
 
 ## Unreleased
 
-Target: `0.2.0-rc.1` after four consecutive scheduled RSS and Criterion runs.
+Target: `0.2.0-rc.1` after four consecutive daily scheduled RSS and Criterion
+runs.
 
 - Made the transient redb sequence index, SAM spool, worker scheduler, and CLI
   implementation crate-private; documented and continuously audit the
@@ -19,8 +20,9 @@ Target: `0.2.0-rc.1` after four consecutive scheduled RSS and Criterion runs.
 - Added a pilot guide, evidence issue template, approval-gated outreach ledger,
   five public pilot invitations, and explicit labels for record and
   backend-disagreement reports.
-- Added release guards requiring four scheduled RSS/performance successes for
-  the RC and seven days without an open release blocker before stable v0.2.0.
+- Added release guards requiring four daily scheduled RSS/performance
+  successes for the RC and seven days without an open release blocker before
+  stable v0.2.0.
 
 ## 0.2.0-alpha.2 - 2026-07-13
 

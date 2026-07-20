@@ -3,7 +3,8 @@ name: Bounded RSS
 on:
   workflow_dispatch:
   schedule:
-    - cron: "23 7 * * 1"
+    # Daily, two hours after Nightly Perf, to keep the evidence jobs staggered.
+    - cron: "23 7 * * *"
   pull_request:
     paths:
       - "src/batch.rs"

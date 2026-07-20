@@ -49,7 +49,8 @@ attestations were verified through fresh public installs.
 
 - `release` and `pypi` GitHub environments require approval.
 - `main` disallows force push/deletion and has all required checks.
-- Four consecutive scheduled RSS/performance runs pass.
+- Four consecutive daily scheduled RSS/performance runs pass. Manual dispatches
+  do not count.
 - The GitHub release contains five archives, five platform wheels, SPDX SBOMs,
   differential/performance reports, `SHA256SUMS`, its Sigstore bundle, and
   GitHub attestations from one tagged commit.
@@ -59,3 +60,6 @@ attestations were verified through fresh public installs.
   fewer than three distinct pilots or missing public evidence links.
 - `v0.2.0-rc.1` has been public for at least seven days and no open issue has
   the `release-blocker` label; the stable tag workflow enforces both conditions.
+
+The daily evidence cadence does not shorten the separate seven-day RC
+observation period.
